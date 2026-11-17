@@ -134,9 +134,9 @@ html, body {
 @keyframes flash { 0% { background: rgba(255,46,136,.35); } 100% { background: transparent; } }
 
 /* Globe */
-#globe canvas { filter: brightness(1.1) saturate(1.2); }
+#globe canvas { filter: brightness(1.15) saturate(1.25); }
 #globe { position: absolute; left: -160px; right: -160px; top: -30px; bottom: -10px; z-index: 1; }
-.globe-ring { position: absolute; left: 50%; top: 50%; width: 820px; height: 820px; transform: translate(-50%, -48%); border-radius: 50%; border: 1px dashed rgba(31,209,249,.18); pointer-events: none; animation: spin 60s linear infinite; z-index: 0; }
+.globe-ring { position: absolute; left: 50%; top: 50%; width: 960px; height: 960px; transform: translate(-50%, -48%); border-radius: 50%; border: 1px dashed rgba(31,209,249,.22); pointer-events: none; animation: spin 60s linear infinite; z-index: 0; }
 @keyframes spin { to { transform: translate(-50%, -48%) rotate(360deg); } }
 .globe-caption { position: absolute; bottom: 4px; left: 0; right: 0; display: flex; justify-content: center; gap: 22px; z-index: 3; font-size: 15px; color: var(--muted); }
 .globe-caption i { display: inline-block; width: 18px; height: 3px; margin-right: 6px; vertical-align: middle; border-radius: 2px; }

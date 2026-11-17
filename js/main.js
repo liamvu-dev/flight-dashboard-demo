@@ -93,52 +93,57 @@ const world = Globe()(globeEl)
   .globeImageUrl('https://unpkg.com/three-globe/example/img/earth-night.jpg')
   .bumpImageUrl('https://unpkg.com/three-globe/example/img/earth-topology.png')
   .showAtmosphere(true)
-  .atmosphereColor('#3aa8ff')
-  .atmosphereAltitude(0.26)
+  .atmosphereColor('#45b6ff')
+  .atmosphereAltitude(0.24)
   // airports
   .pointsData(AIRPORTS)
   .pointLat('lat').pointLng('lng')
   .pointColor((d) => REGIONS[d.region].color)
-  .pointAltitude(0.005)
-  .pointRadius(0.32)
+  .pointAltitude(0.007)
+  .pointRadius(0.34)
   .pointsMerge(true)
-  // arcs
-  .arcsData(arcs)
-  .arcColor((d) => d.color)
-  .arcStroke(0.45)
-  .arcAltitudeAutoScale(0.45)
-  .arcDashLength(0.45)
-  .arcDashGap(0.25)
-  .arcDashInitialGap(() => Math.random())
-  .arcDashAnimateTime(() => rand(1600, 3200))
-  .arcsTransitionDuration(600)
   // pulse rings
   .ringsData(rings)
   .ringColor((d) => (t) => `rgba(${d.rgb},${1 - t})`)
-  .ringMaxRadius(3.2)
+  .ringMaxRadius(3.4)
   .ringPropagationSpeed(2.4)
   .ringRepeatPeriod(700);
 
-world.pointOfView({ lat: 22, lng: 35, altitude: 2.05 }, 0);
+// Larger globe view (altitude decreased to 1.62 to bring camera closer)
+world.pointOfView({ lat: 22, lng: 35, altitude: 1.62 }, 0);
 
-// Brighten the earth: use the texture itself as emissive light so the whole globe glows evenly
+// Load country borders and illuminated landmass to make continents pop out
+fetch('data/countries.geojson')
+  .then((res) => res.json())
+  .then((countries) => {
+    world
+      .polygonsData(countries.features)
+      .polygonAltitude(0.006)
+      .polygonCapColor(() => 'rgba(25, 75, 145, 0.42)')
+      .polygonSideColor(() => 'rgba(0, 0, 0, 0)')
+      .polygonStrokeColor(() => 'rgba(80, 215, 255, 0.72)');
+  })
+  .catch((e) => console.warn('Could not load countries.geojson', e));
+
+// Brighten the earth: emissive texture glow so oceans remain deep blue while land and lights pop
 (function brightenGlobe() {
   const mat = world.globeMaterial();
-  if (!mat.map) return setTimeout(brightenGlobe, 200); // wait until texture is loaded
+  if (!mat.map) return setTimeout(brightenGlobe, 200);
   mat.emissiveMap = mat.map;
-  mat.emissive.set('#bfe4ff');
-  mat.emissiveIntensity = 1.25;
-  mat.shininess = 8;
+  mat.emissive.set('#8ac8ff');
+  mat.emissiveIntensity = 1.45;
+  mat.shininess = 14;
   mat.needsUpdate = true;
 })();
 const controls = world.controls();
 controls.autoRotate = true;
-controls.autoRotateSpeed = -0.55; // rotate east -> west, like the video (Europe → Atlantic → Americas)
+controls.autoRotateSpeed = -0.55; // rotate east -> west
 controls.enableZoom = false;
 
 const hexToRgb = (h) => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16)).join(',');
 
-// ===================== 3D Planes flying along arcs =====================
+// ===================== 3D Planes & Trailing Arcs =====================
+// Airplanes lead the flight path. The trailing arc grows out behind the plane's tail.
 const DEG2RAD = Math.PI / 180;
 const RAD2DEG = 180 / Math.PI;
 
@@ -244,6 +249,12 @@ function buildPlaneMesh(colorHex) {
   hTailGeo.rotateX(Math.PI / 2);
   group.add(new THREE.Mesh(hTailGeo, wingMat));
 
+  // Glowing afterburner nozzle at the exact tail connector point
+  const nozzleGeo = new THREE.SphereGeometry(0.35, 6, 6);
+  nozzleGeo.translate(0, 0.25, -2.4);
+  const nozzleMat = new THREE.MeshBasicMaterial({ color: '#ffffff' });
+  group.add(new THREE.Mesh(nozzleGeo, nozzleMat));
+
   return group;
 }
 
@@ -251,16 +262,51 @@ const planes = [];
 const planesGroup = new THREE.Group();
 world.scene().add(planesGroup);
 
+const SEGMENTS = 50;
+
 function createPlane(arc, colorHex, isInitial) {
   const { curve, distance } = makeArcCurve(arc.startLat, arc.startLng, arc.endLat, arc.endLng);
   const mesh = buildPlaneMesh(colorHex);
   planesGroup.add(mesh);
+
+  const curvePoints = curve.getPoints(SEGMENTS);
+  const maxPts = SEGMENTS + 2;
+  const positions = new Float32Array(maxPts * 3);
+  const lineGeo = new THREE.BufferGeometry();
+  lineGeo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+  lineGeo.setDrawRange(0, 0);
+
+  // Outer colored trailing arc
+  const lineMat = new THREE.LineBasicMaterial({
+    color: colorHex,
+    transparent: true,
+    opacity: 0.92,
+    depthTest: true,
+  });
+  const lineMesh = new THREE.Line(lineGeo, lineMat);
+  planesGroup.add(lineMesh);
+
+  // Inner bright core trail
+  const coreMat = new THREE.LineBasicMaterial({
+    color: '#ffffff',
+    transparent: true,
+    opacity: 0.5,
+    depthTest: true,
+  });
+  const coreMesh = new THREE.Line(lineGeo, coreMat);
+  planesGroup.add(coreMesh);
+
   const plane = {
     arc,
     curve,
+    curvePoints,
     mesh,
+    lineMesh,
+    coreMesh,
+    positions,
     t: isInitial ? Math.random() : 0,
-    speed: 0.00015 + (1 / (4000 + distance * 3500)),
+    speed: 0.00014 + (1 / (4500 + distance * 3600)),
+    colorHex,
   };
   arc.plane = plane;
   planes.push(plane);
@@ -268,13 +314,20 @@ function createPlane(arc, colorHex, isInitial) {
 
 function removePlane(arc) {
   if (!arc || !arc.plane) return;
-  const idx = planes.indexOf(arc.plane);
+  const plane = arc.plane;
+  const idx = planes.indexOf(plane);
   if (idx !== -1) planes.splice(idx, 1);
-  planesGroup.remove(arc.plane.mesh);
-  arc.plane.mesh.traverse((o) => {
+  planesGroup.remove(plane.mesh);
+  planesGroup.remove(plane.lineMesh);
+  planesGroup.remove(plane.coreMesh);
+  plane.mesh.traverse((o) => {
     if (o.geometry) o.geometry.dispose();
     if (o.material) o.material.dispose();
   });
+  plane.lineMesh.geometry.dispose();
+  plane.lineMesh.material.dispose();
+  plane.coreMesh.geometry.dispose();
+  plane.coreMesh.material.dispose();
 }
 
 const matrix = new THREE.Matrix4();
@@ -283,6 +336,8 @@ const up = new THREE.Vector3();
 const right = new THREE.Vector3();
 const trueUp = new THREE.Vector3();
 const scaleVec = new THREE.Vector3();
+const tailLocal = new THREE.Vector3();
+const tailPos = new THREE.Vector3();
 
 let lastTime = performance.now();
 function animatePlanes(now) {
@@ -292,8 +347,12 @@ function animatePlanes(now) {
   for (let i = 0; i < planes.length; i++) {
     const p = planes[i];
     p.t += p.speed * dt;
-    if (p.t > 1) p.t -= 1; // loop from start to end continuously
+    if (p.t > 1) {
+      p.t = 0;
+      addRing(p.arc.to); // trigger pulse ring at destination when plane arrives
+    }
 
+    // 1. Position & orientation of plane
     const t1 = p.t;
     const t2 = Math.min(p.t + 0.005, 1.0);
     const p1 = p.curve.getPoint(t1);
@@ -304,15 +363,43 @@ function animatePlanes(now) {
     right.crossVectors(forward, up).normalize();
     trueUp.crossVectors(right, forward).normalize();
 
-    const fade = Math.min(1, Math.sin(Math.PI * p.t) * 4.5);
-    const s = fade * 0.7;
+    // Scale up at takeoff, scale down at landing
+    const fade = Math.min(1, Math.sin(Math.PI * p.t) * 5.0);
+    const s = fade * 0.85;
     scaleVec.set(s, s, s);
 
     matrix.makeBasis(right, trueUp, forward);
     matrix.setPosition(p1);
     matrix.scale(scaleVec);
-
     p.mesh.matrix.copy(matrix);
+
+    // 2. Exact world coordinates of plane's tail
+    tailLocal.set(0, 0.25, -2.4);
+    tailPos.copy(tailLocal).applyMatrix4(matrix);
+
+    // 3. Trailing line: from departure airport up to the plane's tail!
+    const curveIdx = Math.floor(p.t * SEGMENTS);
+    let count = 0;
+    const pos = p.positions;
+
+    for (let k = 0; k <= curveIdx && k < p.curvePoints.length; k++) {
+      const pt = p.curvePoints[k];
+      pos[count * 3]     = pt.x;
+      pos[count * 3 + 1] = pt.y;
+      pos[count * 3 + 2] = pt.z;
+      count++;
+    }
+
+    // Connect last vertex directly to the tail
+    pos[count * 3]     = tailPos.x;
+    pos[count * 3 + 1] = tailPos.y;
+    pos[count * 3 + 2] = tailPos.z;
+    count++;
+
+    p.lineMesh.geometry.attributes.position.needsUpdate = true;
+    p.lineMesh.geometry.setDrawRange(0, count);
+    p.lineMesh.material.opacity = Math.min(0.95, fade * 1.2);
+    p.coreMesh.material.opacity = Math.min(0.55, fade * 0.8);
   }
   requestAnimationFrame(animatePlanes);
 }
@@ -321,20 +408,20 @@ requestAnimationFrame(animatePlanes);
 function addArc(b, isInitial) {
   const c = REGIONS[b.region].color;
   const arc = {
+    from: b.from,
+    to: b.to,
     startLat: b.from.lat, startLng: b.from.lng, endLat: b.to.lat, endLng: b.to.lng,
-    color: [`${c}22`, c, '#ffffff'],
   };
   createPlane(arc, c, isInitial);
   arcs.push(arc);
-  if (arcs.length > 140) removePlane(arcs.shift());
-  world.arcsData([...arcs]);
+  if (arcs.length > 80) removePlane(arcs.shift());
 }
 function addRing(ap) {
   rings.push({ lat: ap.lat, lng: ap.lng, rgb: hexToRgb(REGIONS[ap.region].color) });
   if (rings.length > 8) rings.shift();
   world.ringsData([...rings]);
 }
-for (let i = 0; i < 90; i++) addArc(genBooking(), true);
+for (let i = 0; i < 65; i++) addArc(genBooking(), true);
 
 addEventListener('resize', () => world.width(globeEl.clientWidth).height(globeEl.clientHeight));
 
