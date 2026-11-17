@@ -90,17 +90,17 @@ const world = Globe()(globeEl)
   .width(globeEl.clientWidth)
   .height(globeEl.clientHeight)
   .backgroundColor('rgba(0,0,0,0)')
-  .globeImageUrl('https://unpkg.com/three-globe/example/img/earth-night.jpg')
-  .bumpImageUrl('https://unpkg.com/three-globe/example/img/earth-topology.png')
+  .globeImageUrl('img/earth-hd.jpg')
+  .bumpImageUrl('img/earth-topology.png')
   .showAtmosphere(true)
-  .atmosphereColor('#45b6ff')
-  .atmosphereAltitude(0.24)
+  .atmosphereColor('#3eb4ff')
+  .atmosphereAltitude(0.20)
   // airports
   .pointsData(AIRPORTS)
   .pointLat('lat').pointLng('lng')
   .pointColor((d) => REGIONS[d.region].color)
-  .pointAltitude(0.007)
-  .pointRadius(0.34)
+  .pointAltitude(0.006)
+  .pointRadius(0.32)
   .pointsMerge(true)
   // pulse rings
   .ringsData(rings)
@@ -109,30 +109,27 @@ const world = Globe()(globeEl)
   .ringPropagationSpeed(2.4)
   .ringRepeatPeriod(700);
 
-// Larger globe view (altitude decreased to 1.62 to bring camera closer)
-world.pointOfView({ lat: 22, lng: 35, altitude: 1.62 }, 0);
+// Larger globe view filling the center stage
+world.pointOfView({ lat: 20, lng: 30, altitude: 1.46 }, 0);
+world.renderer().setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
 
-// Load country borders and illuminated landmass to make continents pop out
-fetch('data/countries.geojson')
-  .then((res) => res.json())
-  .then((countries) => {
-    world
-      .polygonsData(countries.features)
-      .polygonAltitude(0.006)
-      .polygonCapColor(() => 'rgba(25, 75, 145, 0.42)')
-      .polygonSideColor(() => 'rgba(0, 0, 0, 0)')
-      .polygonStrokeColor(() => 'rgba(80, 215, 255, 0.72)');
-  })
-  .catch((e) => console.warn('Could not load countries.geojson', e));
-
-// Brighten the earth: emissive texture glow so oceans remain deep blue while land and lights pop
-(function brightenGlobe() {
+// Enhance 4K satellite relief, anisotropic sharpness & balanced 3D shading
+(function enhanceGlobeMaterial() {
   const mat = world.globeMaterial();
-  if (!mat.map) return setTimeout(brightenGlobe, 200);
+  if (!mat.map) return setTimeout(enhanceGlobeMaterial, 120);
+  const maxAniso = world.renderer().capabilities.getMaxAnisotropy();
+  mat.map.anisotropy = maxAniso;
+  mat.map.needsUpdate = true;
+  if (mat.bumpMap) {
+    mat.bumpMap.anisotropy = maxAniso;
+    mat.bumpScale = 5.5;
+  }
+  mat.color = new THREE.Color('#4a6688');
   mat.emissiveMap = mat.map;
-  mat.emissive.set('#8ac8ff');
-  mat.emissiveIntensity = 1.45;
-  mat.shininess = 14;
+  mat.emissive = new THREE.Color('#e8f4ff');
+  mat.emissiveIntensity = 0.78;
+  mat.specular = new THREE.Color('#184470');
+  mat.shininess = 18;
   mat.needsUpdate = true;
 })();
 const controls = world.controls();

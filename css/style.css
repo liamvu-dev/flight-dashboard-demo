@@ -66,17 +66,17 @@ html, body {
   filter: drop-shadow(0 0 10px rgba(31,209,249,.6));
   white-space: nowrap;
 }
-.header-info { width: 330px; display: flex; justify-content: flex-end; align-items: center; gap: 22px; }
-.hotline { font-size: 18px; color: var(--muted); }
+.header-info { width: 350px; display: flex; justify-content: flex-end; align-items: center; gap: 20px; }
+.hotline { font-size: 18px; color: var(--muted); white-space: nowrap; }
 .hotline b { color: #fff; font-family: 'Share Tech Mono'; font-size: 20px; margin-left: 4px; }
 .clock { display: flex; flex-direction: column; align-items: flex-end; border-left: 1px solid var(--line-dim); padding-left: 18px; }
 #clock-time { font-family: 'Orbitron'; font-size: 26px; color: #fff; text-shadow: 0 0 10px #1fd1f9; }
 #clock-date { font-size: 14px; color: var(--muted); letter-spacing: 1px; }
 
 /* ============ KPI ============ */
-.kpis { display: grid; grid-template-columns: 1.35fr 1fr 1fr 1fr 1fr; gap: 16px; height: 92px; margin: 10px 0 14px; flex-shrink: 0; }
+.kpis { display: grid; grid-template-columns: 1.35fr 1fr 1fr 1fr 1fr; gap: 16px; height: 92px; margin: 10px 0 14px; flex-shrink: 0; position: relative; z-index: 3; }
 .kpi {
-  position: relative; padding: 12px 20px; background: var(--panel);
+  position: relative; padding: 12px 20px; background: rgba(8, 22, 52, 0.82); backdrop-filter: blur(4px);
   border: 1px solid var(--line-dim);
   clip-path: polygon(14px 0, 100% 0, 100% calc(100% - 14px), calc(100% - 14px) 100%, 0 100%, 0 14px);
 }
@@ -134,11 +134,11 @@ html, body {
 @keyframes flash { 0% { background: rgba(255,46,136,.35); } 100% { background: transparent; } }
 
 /* Globe */
-#globe canvas { filter: brightness(1.15) saturate(1.25); }
-#globe { position: absolute; left: -160px; right: -160px; top: -30px; bottom: -10px; z-index: 1; }
-.globe-ring { position: absolute; left: 50%; top: 50%; width: 960px; height: 960px; transform: translate(-50%, -48%); border-radius: 50%; border: 1px dashed rgba(31,209,249,.22); pointer-events: none; animation: spin 60s linear infinite; z-index: 0; }
-@keyframes spin { to { transform: translate(-50%, -48%) rotate(360deg); } }
-.globe-caption { position: absolute; bottom: 4px; left: 0; right: 0; display: flex; justify-content: center; gap: 22px; z-index: 3; font-size: 15px; color: var(--muted); }
+#globe canvas { filter: contrast(1.04) saturate(1.08); }
+#globe { position: absolute; left: -200px; right: -200px; top: -30px; bottom: -8px; z-index: 1; }
+.globe-ring { position: absolute; left: 50%; top: 50%; width: 950px; height: 950px; transform: translate(-50%, -50%); border-radius: 50%; border: 1px dashed rgba(31,209,249,.24); box-shadow: 0 0 40px rgba(31,209,249,.08), inset 0 0 40px rgba(31,209,249,.06); pointer-events: none; animation: spin 60s linear infinite; z-index: 0; }
+@keyframes spin { to { transform: translate(-50%, -50%) rotate(360deg); } }
+.globe-caption { position: absolute; bottom: 2px; left: 50%; transform: translateX(-50%); display: flex; justify-content: center; gap: 20px; z-index: 3; font-size: 15px; color: #b8d8f8; background: rgba(5, 14, 36, 0.76); border: 1px solid rgba(31, 209, 249, 0.24); border-radius: 999px; padding: 4px 22px; backdrop-filter: blur(4px); white-space: nowrap; }
 .globe-caption i { display: inline-block; width: 18px; height: 3px; margin-right: 6px; vertical-align: middle; border-radius: 2px; }
 
 /* Bars */
