@@ -1,11 +1,11 @@
 // ===== Static reference data =====
 const REGIONS = {
-  Asia:     { color: '#22e3ff', weight: 38 },
-  Europe:   { color: '#3dffb5', weight: 24 },
+  Asia:     { color: '#ffcc33', weight: 38 },
+  Europe:   { color: '#2eff7a', weight: 24 },
   Americas: { color: '#ff2e88', weight: 19 },
-  Mideast:  { color: '#ff9a3c', weight: 8 },
-  Africa:   { color: '#b46bff', weight: 9 },
-  Oceania:  { color: '#ffe14d', weight: 2 },
+  Mideast:  { color: '#ff781f', weight: 8 },
+  Africa:   { color: '#c85bff', weight: 9 },
+  Oceania:  { color: '#a8ff35', weight: 2 },
 };
 
 // [IATA, lat, lng, region]

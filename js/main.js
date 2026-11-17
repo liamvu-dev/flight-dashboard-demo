@@ -95,19 +95,20 @@ const world = Globe()(globeEl)
   .showAtmosphere(true)
   .atmosphereColor('#3eb4ff')
   .atmosphereAltitude(0.20)
-  // airports
-  .pointsData(AIRPORTS)
-  .pointLat('lat').pointLng('lng')
-  .pointColor((d) => REGIONS[d.region].color)
-  .pointAltitude(0.006)
-  .pointRadius(0.32)
-  .pointsMerge(true)
-  // pulse rings
+  // pulse rings on arrival / new booking
   .ringsData(rings)
-  .ringColor((d) => (t) => `rgba(${d.rgb},${1 - t})`)
-  .ringMaxRadius(3.4)
-  .ringPropagationSpeed(2.4)
-  .ringRepeatPeriod(700);
+  .ringColor((d) => (t) => `rgba(${d.rgb},${Math.pow(1 - t, 0.7)})`)
+  .ringMaxRadius(4.2)
+  .ringPropagationSpeed(2.6)
+  .ringRepeatPeriod(650);
+
+// Sync bottom legend pill with REGIONS colors + neon glow
+const captionEl = $('#globe-caption');
+if (captionEl) {
+  captionEl.innerHTML = regionKeys
+    .map((r) => `<span><i style="background:${REGIONS[r].color};box-shadow:0 0 8px ${REGIONS[r].color}"></i>${r}</span>`)
+    .join('');
+}
 
 // Larger globe view filling the center stage
 world.pointOfView({ lat: 20, lng: 30, altitude: 1.46 }, 0);
@@ -138,6 +139,126 @@ controls.autoRotateSpeed = -0.55; // rotate east -> west
 controls.enableZoom = false;
 
 const hexToRgb = (h) => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16)).join(',');
+
+// ===================== Glowing Airport Beacons & Destination Targets =====================
+const texCache = new Map();
+
+function getBeaconTexture(colorHex) {
+  const key = 'beacon_' + colorHex;
+  if (texCache.has(key)) return texCache.get(key);
+  const c = document.createElement('canvas');
+  c.width = 128; c.height = 128;
+  const ctx = c.getContext('2d');
+
+  // Soft outer neon halo + saturated color ring + bright white core
+  const grad = ctx.createRadialGradient(64, 64, 4, 64, 64, 62);
+  grad.addColorStop(0, '#ffffff');
+  grad.addColorStop(0.18, '#ffffff');
+  grad.addColorStop(0.32, colorHex);
+  grad.addColorStop(0.55, colorHex + 'cc');
+  grad.addColorStop(0.80, colorHex + '44');
+  grad.addColorStop(1, colorHex + '00');
+  ctx.fillStyle = grad;
+  ctx.beginPath();
+  ctx.arc(64, 64, 62, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Subtle dark contrast rim + crisp colored outer ring so it pops even on bright deserts
+  ctx.strokeStyle = 'rgba(4, 14, 34, 0.45)';
+  ctx.lineWidth = 6;
+  ctx.beginPath();
+  ctx.arc(64, 64, 28, 0, Math.PI * 2);
+  ctx.stroke();
+
+  ctx.strokeStyle = colorHex;
+  ctx.lineWidth = 3.5;
+  ctx.beginPath();
+  ctx.arc(64, 64, 28, 0, Math.PI * 2);
+  ctx.stroke();
+
+  const tex = new THREE.CanvasTexture(c);
+  texCache.set(key, tex);
+  return tex;
+}
+
+function getTargetTexture(colorHex) {
+  const key = 'target_' + colorHex;
+  if (texCache.has(key)) return texCache.get(key);
+  const c = document.createElement('canvas');
+  c.width = 128; c.height = 128;
+  const ctx = c.getContext('2d');
+
+  // Outer radiant bloom
+  const grad = ctx.createRadialGradient(64, 64, 4, 64, 64, 62);
+  grad.addColorStop(0, '#ffffff');
+  grad.addColorStop(0.18, '#ffffff');
+  grad.addColorStop(0.32, colorHex);
+  grad.addColorStop(0.72, colorHex + '55');
+  grad.addColorStop(1, colorHex + '00');
+  ctx.fillStyle = grad;
+  ctx.beginPath();
+  ctx.arc(64, 64, 62, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Outer bullseye target ring
+  ctx.strokeStyle = colorHex;
+  ctx.lineWidth = 5;
+  ctx.beginPath();
+  ctx.arc(64, 64, 44, 0, Math.PI * 2);
+  ctx.stroke();
+
+  // Inner bright white ring
+  ctx.strokeStyle = '#ffffff';
+  ctx.lineWidth = 3;
+  ctx.beginPath();
+  ctx.arc(64, 64, 22, 0, Math.PI * 2);
+  ctx.stroke();
+
+  const tex = new THREE.CanvasTexture(c);
+  texCache.set(key, tex);
+  return tex;
+}
+
+function getPlaneAuraTexture(colorHex) {
+  const key = 'aura_' + colorHex;
+  if (texCache.has(key)) return texCache.get(key);
+  const c = document.createElement('canvas');
+  c.width = 64; c.height = 64;
+  const ctx = c.getContext('2d');
+  const grad = ctx.createRadialGradient(32, 32, 2, 32, 32, 30);
+  grad.addColorStop(0, colorHex + 'aa');
+  grad.addColorStop(0.45, colorHex + '44');
+  grad.addColorStop(1, colorHex + '00');
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, 64, 64);
+  const tex = new THREE.CanvasTexture(c);
+  texCache.set(key, tex);
+  return tex;
+}
+
+// Render bright self-illuminated airport beacons across the globe
+const beaconsGroup = new THREE.Group();
+world.scene().add(beaconsGroup);
+const beaconGeo = new THREE.PlaneGeometry(2.6, 2.6);
+
+for (const ap of AIRPORTS) {
+  const colorHex = REGIONS[ap.region].color;
+  const mat = new THREE.MeshBasicMaterial({
+    map: getBeaconTexture(colorHex),
+    transparent: true,
+    opacity: 0.95,
+    depthTest: true,
+    depthWrite: false,
+    polygonOffset: true,
+    polygonOffsetFactor: -2,
+    side: THREE.DoubleSide,
+  });
+  const m = new THREE.Mesh(beaconGeo, mat);
+  const pos = world.getCoords(ap.lat, ap.lng, 0.004);
+  m.position.set(pos.x, pos.y, pos.z);
+  m.lookAt(pos.x * 2, pos.y * 2, pos.z * 2);
+  beaconsGroup.add(m);
+}
 
 // ===================== 3D Planes & Trailing Arcs =====================
 // Airplanes lead the flight path. The trailing arc grows out behind the plane's tail.
@@ -204,8 +325,22 @@ function buildPlaneMesh(colorHex) {
   const bodyGeo = new THREE.CylinderGeometry(0.7, 0.6, 2.6, 7);
   bodyGeo.rotateX(Math.PI / 2);
   bodyGeo.translate(0, 0, -1.3);
-  const bodyMat = new THREE.MeshBasicMaterial({ color: '#cbe9ff' });
+  const bodyMat = new THREE.MeshBasicMaterial({ color: '#ffffff' });
   group.add(new THREE.Mesh(bodyGeo, bodyMat));
+
+  // Soft neon aura beneath the aircraft so it stands out sharply against coastlines & terrain
+  const auraGeo = new THREE.PlaneGeometry(8.2, 8.2);
+  auraGeo.rotateX(Math.PI / 2);
+  auraGeo.translate(0, -0.15, -0.6);
+  const auraMat = new THREE.MeshBasicMaterial({
+    map: getPlaneAuraTexture(colorHex),
+    transparent: true,
+    opacity: 0.75,
+    blending: THREE.AdditiveBlending,
+    depthWrite: false,
+    side: THREE.DoubleSide,
+  });
+  group.add(new THREE.Mesh(auraGeo, auraMat));
 
   // Swept wings (oriented in X-Z plane)
   const wingShape = new THREE.Shape();
@@ -260,11 +395,29 @@ const planesGroup = new THREE.Group();
 world.scene().add(planesGroup);
 
 const SEGMENTS = 50;
+const destTargetGeo = new THREE.PlaneGeometry(3.8, 3.8);
 
 function createPlane(arc, colorHex, isInitial) {
   const { curve, distance } = makeArcCurve(arc.startLat, arc.startLng, arc.endLat, arc.endLng);
   const mesh = buildPlaneMesh(colorHex);
   planesGroup.add(mesh);
+
+  // Glowing pulsing destination bullseye at arc.to
+  const destMat = new THREE.MeshBasicMaterial({
+    map: getTargetTexture(colorHex),
+    transparent: true,
+    opacity: 0.95,
+    depthTest: true,
+    depthWrite: false,
+    polygonOffset: true,
+    polygonOffsetFactor: -3,
+    side: THREE.DoubleSide,
+  });
+  const destMesh = new THREE.Mesh(destTargetGeo, destMat);
+  const dPos = world.getCoords(arc.endLat, arc.endLng, 0.005);
+  destMesh.position.set(dPos.x, dPos.y, dPos.z);
+  destMesh.lookAt(dPos.x * 2, dPos.y * 2, dPos.z * 2);
+  planesGroup.add(destMesh);
 
   const curvePoints = curve.getPoints(SEGMENTS);
   const maxPts = SEGMENTS + 2;
@@ -277,7 +430,7 @@ function createPlane(arc, colorHex, isInitial) {
   const lineMat = new THREE.LineBasicMaterial({
     color: colorHex,
     transparent: true,
-    opacity: 0.92,
+    opacity: 0.95,
     depthTest: true,
   });
   const lineMesh = new THREE.Line(lineGeo, lineMat);
@@ -287,7 +440,7 @@ function createPlane(arc, colorHex, isInitial) {
   const coreMat = new THREE.LineBasicMaterial({
     color: '#ffffff',
     transparent: true,
-    opacity: 0.5,
+    opacity: 0.55,
     depthTest: true,
   });
   const coreMesh = new THREE.Line(lineGeo, coreMat);
@@ -298,10 +451,12 @@ function createPlane(arc, colorHex, isInitial) {
     curve,
     curvePoints,
     mesh,
+    destMesh,
     lineMesh,
     coreMesh,
     positions,
     t: isInitial ? Math.random() : 0,
+    phase: Math.random() * Math.PI * 2,
     speed: 0.00014 + (1 / (4500 + distance * 3600)),
     colorHex,
   };
@@ -315,12 +470,14 @@ function removePlane(arc) {
   const idx = planes.indexOf(plane);
   if (idx !== -1) planes.splice(idx, 1);
   planesGroup.remove(plane.mesh);
+  planesGroup.remove(plane.destMesh);
   planesGroup.remove(plane.lineMesh);
   planesGroup.remove(plane.coreMesh);
   plane.mesh.traverse((o) => {
     if (o.geometry) o.geometry.dispose();
     if (o.material) o.material.dispose();
   });
+  plane.destMesh.material.dispose();
   plane.lineMesh.geometry.dispose();
   plane.lineMesh.material.dispose();
   plane.coreMesh.geometry.dispose();
@@ -397,6 +554,12 @@ function animatePlanes(now) {
     p.lineMesh.geometry.setDrawRange(0, count);
     p.lineMesh.material.opacity = Math.min(0.95, fade * 1.2);
     p.coreMesh.material.opacity = Math.min(0.55, fade * 0.8);
+
+    // 4. Pulse destination bullseye beacon so arrival points shine clearly
+    const approachBoost = p.t > 0.65 ? (p.t - 0.65) / 0.35 : 0;
+    const pulse = 0.88 + 0.25 * Math.sin(now * 0.006 + p.phase) + 0.35 * approachBoost;
+    p.destMesh.scale.set(pulse, pulse, 1);
+    p.destMesh.material.opacity = Math.min(1.0, 0.72 + 0.28 * approachBoost);
   }
   requestAnimationFrame(animatePlanes);
 }
@@ -415,7 +578,7 @@ function addArc(b, isInitial) {
 }
 function addRing(ap) {
   rings.push({ lat: ap.lat, lng: ap.lng, rgb: hexToRgb(REGIONS[ap.region].color) });
-  if (rings.length > 8) rings.shift();
+  if (rings.length > 14) rings.shift();
   world.ringsData([...rings]);
 }
 for (let i = 0; i < 65; i++) addArc(genBooking(), true);
