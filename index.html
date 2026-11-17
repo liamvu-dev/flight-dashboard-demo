@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Onefly Order Monitoring System</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700;900&family=Rajdhani:wght@500;600;700&family=Share+Tech+Mono&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="css/style.css" />
+  <script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/echarts@5.5.1/dist/echarts.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/globe.gl@2.33.1/dist/globe.gl.min.js"></script>
+</head>
+<body>
+  <div id="stars"></div>
+  <div id="app">
+    <!-- HEADER -->
+    <header class="header">
+      <div class="logo">
+        <svg viewBox="0 0 40 40" width="38" height="38"><path d="M20 3a17 17 0 1 0 17 17h-7a10 10 0 1 1-10-10z" fill="none" stroke="#1fd1f9" stroke-width="4"/><path d="M24 8l12-4-4 12-3-5z" fill="#1fd1f9"/></svg>
+        <span>onefly</span>
+      </div>
+      <div class="header-line left"><i></i></div>
+      <div class="title-wrap">
+        <h1 class="title">Onefly Order Monitoring System</h1>
+      </div>
+      <div class="header-line right"><i></i></div>
+      <div class="header-info">
+        <div class="hotline">Hotline <b>1900 6868</b></div>
+        <div class="clock"><span id="clock-time">--:--:--</span><small id="clock-date">----</small></div>
+      </div>
+    </header>
+
+    <!-- KPI -->
+    <section class="kpis">
+      <div class="kpi big"><label>Order Sales Amount</label><div class="val" id="kpi-sales">$0</div></div>
+      <div class="kpi"><label>Available Routes</label><div class="val" id="kpi-routes">0</div></div>
+      <div class="kpi"><label>Covered Airports</label><div class="val" id="kpi-airports">0</div></div>
+      <div class="kpi"><label>Partner Airlines</label><div class="val" id="kpi-airlines">0</div></div>
+      <div class="kpi"><label>Covered Countries / Regions</label><div class="val" id="kpi-countries">0</div></div>
+    </section>
+
+    <!-- BODY -->
+    <main class="body">
+      <aside class="col left">
+        <div class="panel" style="height:300px">
+          <div class="panel-title"><span>Global Route Distribution</span></div>
+          <div class="dist">
+            <div class="legend" id="legend-left"></div>
+            <div id="donut"></div>
+            <div class="legend" id="legend-right"></div>
+          </div>
+        </div>
+        <div class="panel grow">
+          <div class="panel-title"><span>Route Booking Records</span><em class="live"><i></i>LIVE</em></div>
+          <div class="table-head"><span>Route</span><span>Departure Time</span><span>Order Time</span></div>
+          <div class="table-body"><div id="rows"></div></div>
+        </div>
+      </aside>
+
+      <section class="center">
+        <div id="globe"></div>
+        <div class="globe-ring"></div>
+        <div class="globe-caption">
+          <span><i style="background:#22e3ff"></i>Asia</span>
+          <span><i style="background:#3dffb5"></i>Europe</span>
+          <span><i style="background:#ff2e88"></i>Americas</span>
+          <span><i style="background:#ff9a3c"></i>Mideast</span>
+          <span><i style="background:#b46bff"></i>Africa</span>
+          <span><i style="background:#ffe14d"></i>Oceania</span>
+        </div>
+      </section>
+
+      <aside class="col right">
+        <div class="panel" style="height:430px">
+          <div class="panel-title"><span>Top 10 Airlines by Orders</span></div>
+          <div id="bars"></div>
+        </div>
+        <div class="panel grow">
+          <div class="panel-title"><span id="routes-title">Top Routes – Asia</span></div>
+          <div id="top-routes"></div>
+        </div>
+      </aside>
+    </main>
+  </div>
+
+  <script src="js/data.js"></script>
+  <script src="js/main.js"></script>
+</body>
+</html>
