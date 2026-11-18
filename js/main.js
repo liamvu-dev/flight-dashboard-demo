@@ -773,31 +773,171 @@ setInterval(() => {
   }, 400);
 }, 10000);
 
-// ===================== Booking table (auto-scroll) =====================
+// ===================== Booking table (auto-scroll, pause/resume & search) =====================
+const tableBodyEl = $('#table-body');
 const rowsEl = $('#rows');
+const liveBadgeEl = $('#live-badge');
+const liveTextEl = liveBadgeEl?.querySelector('.live-text');
+const btnLiveToggle = $('#btn-live-toggle');
+const routeSearchEl = $('#route-search');
+const btnClearSearch = $('#btn-clear-search');
+const recordsCountEl = $('#records-count');
+
 const ROW_H = 38;
+const MAX_TABLE_ROWS = 18;
+const MAX_BOOKING_HISTORY = 120;
+const bookingHistory = [];
+
+let isLivePaused = false;
+let rawSearchQuery = '';
+let searchQuery = '';
+let scrolling = false;
+let scrollTimer = null;
+
 function rowHtml(b) {
   return `<span class="r">${b.from.code} – ${b.to.code}</span><span>${fmtDT(b.depTime)}</span><span>${fmtDT(b.orderTime)}</span>`;
 }
-for (let i = 0; i < 18; i++) {
-  const b = genBooking();
-  b.orderTime = new Date(Date.now() - (18 - i) * 4000);
+
+function createRowEl(b, isNew = false) {
   const div = document.createElement('div');
-  div.className = 'row'; div.innerHTML = rowHtml(b);
-  rowsEl.appendChild(div);
+  div.className = isNew ? 'row new' : 'row';
+  div.innerHTML = rowHtml(b);
+  return div;
 }
-let scrolling = false;
+
+function normalizeRouteQuery(s) {
+  return String(s || '').trim().toLowerCase().replace(/[–—-]+/g, ' ').replace(/\s+/g, ' ');
+}
+
+function matchesRouteFilter(b, normalizedQuery) {
+  if (!normalizedQuery) return true;
+  const routeText = `${b.from.code} ${b.to.code}`.toLowerCase();
+  return routeText.includes(normalizedQuery);
+}
+
+function cancelRowScrollAnimation() {
+  if (scrollTimer) {
+    clearTimeout(scrollTimer);
+    scrollTimer = null;
+  }
+  if (scrolling) {
+    rowsEl.classList.remove('anim');
+    while (rowsEl.children.length > MAX_TABLE_ROWS) rowsEl.firstElementChild.remove();
+    rowsEl.style.transform = 'translateY(0)';
+    scrolling = false;
+  }
+}
+
+function syncTableModeClasses() {
+  if (!tableBodyEl) return;
+  const isFiltered = Boolean(searchQuery);
+  tableBodyEl.classList.toggle('filtered', isFiltered);
+  tableBodyEl.classList.toggle('paused', isLivePaused);
+  if (!isFiltered && !isLivePaused) tableBodyEl.scrollTop = 0;
+}
+
+function renderRows(highlightBooking = null) {
+  cancelRowScrollAnimation();
+  syncTableModeClasses();
+  rowsEl.innerHTML = '';
+
+  if (searchQuery) {
+    const matches = [];
+    for (let i = bookingHistory.length - 1; i >= 0; i--) {
+      const b = bookingHistory[i];
+      if (matchesRouteFilter(b, searchQuery)) matches.push(b);
+    }
+    if (recordsCountEl) {
+      recordsCountEl.textContent = `${matches.length} ${matches.length === 1 ? 'match' : 'matches'}`;
+    }
+    if (matches.length === 0) {
+      const empty = document.createElement('div');
+      empty.className = 'table-empty';
+      empty.textContent = `No matching routes for "${rawSearchQuery.trim()}"`;
+      rowsEl.appendChild(empty);
+      return;
+    }
+    const frag = document.createDocumentFragment();
+    for (const b of matches) frag.appendChild(createRowEl(b, b === highlightBooking));
+    rowsEl.appendChild(frag);
+    return;
+  }
+
+  if (recordsCountEl) recordsCountEl.textContent = '';
+  const recent = bookingHistory.slice(-MAX_TABLE_ROWS);
+  const frag = document.createDocumentFragment();
+  for (const b of recent) frag.appendChild(createRowEl(b, false));
+  rowsEl.appendChild(frag);
+}
+
+function setLivePaused(paused) {
+  isLivePaused = Boolean(paused);
+  if (isLivePaused) cancelRowScrollAnimation();
+  if (liveBadgeEl) liveBadgeEl.classList.toggle('paused', isLivePaused);
+  if (liveTextEl) liveTextEl.textContent = isLivePaused ? 'PAUSED' : 'LIVE';
+  if (btnLiveToggle) {
+    btnLiveToggle.classList.toggle('paused', isLivePaused);
+    btnLiveToggle.setAttribute('aria-pressed', String(isLivePaused));
+    btnLiveToggle.setAttribute('aria-label', isLivePaused ? 'Resume Live Stream' : 'Pause Live Stream');
+    btnLiveToggle.setAttribute('title', isLivePaused ? 'Resume Live Stream' : 'Pause Live Stream');
+  }
+  syncTableModeClasses();
+}
+
+function updateSearchFilter() {
+  rawSearchQuery = routeSearchEl ? routeSearchEl.value : '';
+  searchQuery = normalizeRouteQuery(rawSearchQuery);
+  if (btnClearSearch) btnClearSearch.hidden = rawSearchQuery.length === 0;
+  renderRows();
+}
+
+if (btnLiveToggle) {
+  btnLiveToggle.addEventListener('click', () => setLivePaused(!isLivePaused));
+}
+if (routeSearchEl) {
+  routeSearchEl.addEventListener('input', updateSearchFilter);
+  routeSearchEl.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && routeSearchEl.value) {
+      e.stopPropagation();
+      routeSearchEl.value = '';
+      updateSearchFilter();
+    }
+  });
+}
+if (btnClearSearch && routeSearchEl) {
+  btnClearSearch.addEventListener('click', () => {
+    routeSearchEl.value = '';
+    updateSearchFilter();
+    routeSearchEl.focus();
+  });
+}
+
+for (let i = 0; i < 60; i++) {
+  const b = genBooking();
+  b.orderTime = new Date(Date.now() - (60 - i) * 4000);
+  bookingHistory.push(b);
+}
+renderRows();
+
 function pushRow(b) {
-  const div = document.createElement('div');
-  div.className = 'row new'; div.innerHTML = rowHtml(b);
-  rowsEl.appendChild(div);
+  if (isLivePaused) return;
+  bookingHistory.push(b);
+  if (bookingHistory.length > MAX_BOOKING_HISTORY) bookingHistory.shift();
+
+  if (searchQuery) {
+    if (matchesRouteFilter(b, searchQuery)) renderRows(b);
+    return;
+  }
+
+  rowsEl.appendChild(createRowEl(b, true));
   if (scrolling) return;
   scrolling = true;
   rowsEl.classList.add('anim');
   rowsEl.style.transform = `translateY(-${ROW_H}px)`;
-  setTimeout(() => {
+  scrollTimer = setTimeout(() => {
+    scrollTimer = null;
     rowsEl.classList.remove('anim');
-    while (rowsEl.children.length > 18) rowsEl.firstElementChild.remove();
+    while (rowsEl.children.length > MAX_TABLE_ROWS) rowsEl.firstElementChild.remove();
     rowsEl.style.transform = 'translateY(0)';
     scrolling = false;
   }, 650);
