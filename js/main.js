@@ -18,9 +18,40 @@ function fit() {
   $('#app').style.transform = `translate(-50%, -50%) scale(${s})`;
 }
 addEventListener('resize', fit); fit();
+
+// ===================== Fullscreen =====================
+const btnFullscreen = $('#btn-fullscreen');
+const getFullscreenElement = () => document.fullscreenElement || document.webkitFullscreenElement || null;
+
+function syncFullscreenState() {
+  const isFs = Boolean(getFullscreenElement());
+  if (btnFullscreen) {
+    btnFullscreen.classList.toggle('active', isFs);
+    btnFullscreen.setAttribute('aria-pressed', String(isFs));
+    btnFullscreen.setAttribute('aria-label', isFs ? 'Exit Fullscreen' : 'Enter Fullscreen');
+    btnFullscreen.setAttribute('title', isFs ? 'Exit Fullscreen (Esc / F)' : 'Enter Fullscreen (F)');
+  }
+}
+
+function toggleFullscreen() {
+  const fsEl = getFullscreenElement();
+  const op = fsEl
+    ? (document.exitFullscreen?.() || document.webkitExitFullscreen?.())
+    : (document.documentElement.requestFullscreen?.() || document.documentElement.webkitRequestFullscreen?.());
+  if (op && typeof op.catch === 'function') op.catch(() => {});
+}
+
+if (btnFullscreen) btnFullscreen.addEventListener('click', toggleFullscreen);
+document.addEventListener('fullscreenchange', () => { syncFullscreenState(); fit(); });
+document.addEventListener('webkitfullscreenchange', () => { syncFullscreenState(); fit(); });
+syncFullscreenState();
+
 addEventListener('keydown', (e) => {
+  if (e.ctrlKey || e.metaKey || e.altKey) return;
+  if (e.target && ['INPUT', 'TEXTAREA', 'SELECT'].includes(e.target.tagName)) return;
   if (e.key.toLowerCase() === 'f') {
-    document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen();
+    e.preventDefault();
+    toggleFullscreen();
   }
 });
 
@@ -86,7 +117,7 @@ for (let i = 0; i < 900; i++) record(genBooking(), true);
 const globeEl = $('#globe');
 const arcs = [];
 const rings = [];
-const world = Globe()(globeEl)
+const world = Globe({ rendererConfig: { preserveDrawingBuffer: true } })(globeEl)
   .width(globeEl.clientWidth)
   .height(globeEl.clientHeight)
   .backgroundColor('rgba(0,0,0,0)')
@@ -584,6 +615,82 @@ function addRing(ap) {
 for (let i = 0; i < 65; i++) addArc(genBooking(), true);
 
 addEventListener('resize', () => world.width(globeEl.clientWidth).height(globeEl.clientHeight));
+
+// ===================== Dashboard Snapshot (PNG) =====================
+const btnSnapshot = $('#btn-snapshot');
+
+function formatSnapshotFilename(date = new Date()) {
+  return `onefly-snapshot-${date.getFullYear()}${pad(date.getMonth() + 1)}${pad(date.getDate())}-${pad(date.getHours())}${pad(date.getMinutes())}${pad(date.getSeconds())}.png`;
+}
+
+function downloadUrl(url, filename) {
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  a.style.display = 'none';
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+}
+
+function captureSnapshot() {
+  const renderer = world.renderer();
+  const webglCanvas = renderer?.domElement;
+  if (!webglCanvas || !webglCanvas.width || !webglCanvas.height) return;
+
+  const composer = typeof world.postProcessingComposer === 'function' ? world.postProcessingComposer() : null;
+  if (composer && composer.passes && composer.passes.length > 1) {
+    composer.render();
+  } else {
+    renderer.render(world.scene(), world.camera());
+  }
+
+  const w = webglCanvas.width;
+  const h = webglCanvas.height;
+  const out = document.createElement('canvas');
+  out.width = w;
+  out.height = h;
+  const ctx = out.getContext('2d');
+  if (!ctx) return;
+
+  const cx = w * 0.5;
+  const cy = h * 0.45;
+  const r = Math.max(w, h) * 0.72;
+  const bg = ctx.createRadialGradient(cx, cy, 0, cx, cy, r);
+  bg.addColorStop(0, '#0b1e45');
+  bg.addColorStop(0.55, '#050d24');
+  bg.addColorStop(1, '#02060f');
+  ctx.fillStyle = bg;
+  ctx.fillRect(0, 0, w, h);
+
+  ctx.filter = 'contrast(1.04) saturate(1.08)';
+  ctx.drawImage(webglCanvas, 0, 0, w, h);
+  ctx.filter = 'none';
+
+  const filename = formatSnapshotFilename();
+  if (typeof out.toBlob === 'function') {
+    out.toBlob((blob) => {
+      if (!blob) {
+        downloadUrl(out.toDataURL('image/png'), filename);
+        return;
+      }
+      const url = URL.createObjectURL(blob);
+      downloadUrl(url, filename);
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    }, 'image/png');
+  } else {
+    downloadUrl(out.toDataURL('image/png'), filename);
+  }
+
+  if (btnSnapshot) {
+    btnSnapshot.classList.remove('captured');
+    void btnSnapshot.offsetWidth;
+    btnSnapshot.classList.add('captured');
+    setTimeout(() => btnSnapshot.classList.remove('captured'), 700);
+  }
+}
+
+if (btnSnapshot) btnSnapshot.addEventListener('click', captureSnapshot);
 
 // ===================== Donut: Global Route Distribution =====================
 const donut = echarts.init($('#donut'));
