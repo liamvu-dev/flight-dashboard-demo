@@ -9,3 +9,6 @@
 - Preserve the existing sci-fi/cyberpunk visual theme (Orbitron, #1fd1f9, dark glassmorphism panels).
 - Run 
 ode --check js/main.js before committing to verify there are no JavaScript syntax errors.
+
+## Visual Inspection / Screenshots
+- When inspecting UI screenshots with iew_image, view **at most 1 image per turn** and prefer compressed JPEG or smaller viewport captures instead of multiple full-resolution PNGs at once (to avoid exceeding the 1M token input limit).
