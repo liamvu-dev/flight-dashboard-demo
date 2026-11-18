@@ -16,9 +16,37 @@
   <div id="app">
     <!-- HEADER -->
     <header class="header">
-      <div class="logo">
-        <svg viewBox="0 0 40 40" width="38" height="38"><path d="M20 3a17 17 0 1 0 17 17h-7a10 10 0 1 1-10-10z" fill="none" stroke="#1fd1f9" stroke-width="4"/><path d="M24 8l12-4-4 12-3-5z" fill="#1fd1f9"/></svg>
-        <span>onefly</span>
+      <div class="header-left">
+        <div class="logo">
+          <svg viewBox="0 0 40 40" width="38" height="38"><path d="M20 3a17 17 0 1 0 17 17h-7a10 10 0 1 1-10-10z" fill="none" stroke="#1fd1f9" stroke-width="4"/><path d="M24 8l12-4-4 12-3-5z" fill="#1fd1f9"/></svg>
+          <span>onefly</span>
+        </div>
+        <div class="hud-toggles" role="group" aria-label="Panel visibility controls">
+          <button type="button" id="btn-toggle-left" class="hud-toggle active" aria-pressed="true" aria-controls="col-left" title="Hide Left Panels" aria-label="Toggle Left Panels">
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <rect x="3" y="4" width="18" height="16" rx="2" />
+              <line x1="9" y1="4" x2="9" y2="20" />
+              <rect x="4.5" y="5.5" width="3.5" height="13" rx="0.5" fill="currentColor" stroke="none" />
+            </svg>
+            <span>LEFT</span>
+          </button>
+          <button type="button" id="btn-toggle-kpis" class="hud-toggle active" aria-pressed="true" aria-controls="kpis" title="Hide KPI Bar" aria-label="Toggle KPI Bar">
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <rect x="3" y="4" width="18" height="16" rx="2" />
+              <line x1="3" y1="10" x2="21" y2="10" />
+              <rect x="4.5" y="5.5" width="15" height="3.2" rx="0.5" fill="currentColor" stroke="none" />
+            </svg>
+            <span>KPI</span>
+          </button>
+          <button type="button" id="btn-toggle-right" class="hud-toggle active" aria-pressed="true" aria-controls="col-right" title="Hide Right Panels" aria-label="Toggle Right Panels">
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <rect x="3" y="4" width="18" height="16" rx="2" />
+              <line x1="15" y1="4" x2="15" y2="20" />
+              <rect x="16" y="5.5" width="3.5" height="13" rx="0.5" fill="currentColor" stroke="none" />
+            </svg>
+            <span>RIGHT</span>
+          </button>
+        </div>
       </div>
       <div class="header-line left"><i></i></div>
       <div class="title-wrap">
@@ -29,6 +57,15 @@
         <div class="hotline">Hotline <b>1900 6868</b></div>
         <div class="clock"><span id="clock-time">--:--:--</span><small id="clock-date">----</small></div>
         <div class="header-actions">
+          <button type="button" id="btn-zen" class="hud-btn" title="Zen / Globe Focus Mode (Z)" aria-label="Enter Zen / Globe Focus Mode" aria-pressed="false">
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M4 9V5a1 1 0 0 1 1-1h4" />
+              <path d="M20 9V5a1 1 0 0 0-1-1h-4" />
+              <path d="M4 15v4a1 1 0 0 0 1 1h4" />
+              <path d="M20 15v4a1 1 0 0 1-1 1h-4" />
+              <circle cx="12" cy="12" r="4" />
+            </svg>
+          </button>
           <button type="button" id="btn-snapshot" class="hud-btn" title="Capture Snapshot (PNG)" aria-label="Capture Snapshot">
             <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
               <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z" />
@@ -54,7 +91,7 @@
     </header>
 
     <!-- KPI -->
-    <section class="kpis">
+    <section class="kpis" id="kpis">
       <div class="kpi big"><label>Order Sales Amount</label><div class="val" id="kpi-sales">$0</div></div>
       <div class="kpi"><label>Available Routes</label><div class="val" id="kpi-routes">0</div></div>
       <div class="kpi"><label>Covered Airports</label><div class="val" id="kpi-airports">0</div></div>
@@ -64,7 +101,7 @@
 
     <!-- BODY -->
     <main class="body">
-      <aside class="col left">
+      <aside class="col left" id="col-left">
         <div class="panel" style="height:300px">
           <div class="panel-title"><span>Global Route Distribution</span></div>
           <div class="dist">
@@ -118,7 +155,7 @@
         </div>
       </section>
 
-      <aside class="col right">
+      <aside class="col right" id="col-right">
         <div class="panel" style="height:430px">
           <div class="panel-title"><span>Top 10 Airlines by Orders</span></div>
           <div id="bars"></div>
@@ -129,6 +166,17 @@
         </div>
       </aside>
     </main>
+
+    <button type="button" id="btn-zen-restore" class="btn-zen-restore" title="Exit Zen Mode (Z / Esc)" aria-label="Exit Zen Mode" aria-hidden="true" tabindex="-1">
+      <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <rect x="3" y="4" width="18" height="16" rx="2" />
+        <line x1="9" y1="4" x2="9" y2="20" />
+        <line x1="15" y1="4" x2="15" y2="20" />
+        <line x1="3" y1="9" x2="21" y2="9" />
+      </svg>
+      <span>Exit Zen</span>
+      <kbd>Z</kbd>
+    </button>
   </div>
 
   <script src="js/data.js"></script>
