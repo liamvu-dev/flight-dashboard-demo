@@ -74,9 +74,34 @@
           </div>
         </div>
         <div class="panel grow">
-          <div class="panel-title"><span>Route Booking Records</span><em class="live"><i></i>LIVE</em></div>
+          <div class="panel-title panel-title--records">
+            <span>Route Booking Records</span>
+            <div class="live-controls">
+              <em class="live" id="live-badge" aria-live="polite"><i></i><b class="live-text">LIVE</b></em>
+              <button type="button" id="btn-live-toggle" class="panel-btn" title="Pause Live Stream" aria-label="Pause Live Stream" aria-pressed="false">
+                <svg class="icon-pause" viewBox="0 0 24 24" width="13" height="13" fill="currentColor" aria-hidden="true">
+                  <rect x="6" y="4" width="4" height="16" rx="1" />
+                  <rect x="14" y="4" width="4" height="16" rx="1" />
+                </svg>
+                <svg class="icon-play" viewBox="0 0 24 24" width="13" height="13" fill="currentColor" aria-hidden="true">
+                  <polygon points="6,4 20,12 6,20" />
+                </svg>
+              </button>
+            </div>
+          </div>
+          <div class="records-toolbar">
+            <div class="search-wrap">
+              <svg class="search-icon" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <circle cx="11" cy="11" r="7" />
+                <line x1="21" y1="21" x2="16.65" y2="16.65" />
+              </svg>
+              <input type="text" id="route-search" class="search-input" placeholder="Filter route or airport (e.g. BKK, SIN)..." aria-label="Filter booking rows by route or airport code" autocomplete="off" spellcheck="false" />
+              <button type="button" id="btn-clear-search" class="search-clear" title="Clear filter" aria-label="Clear filter" hidden>&times;</button>
+            </div>
+            <div class="records-count" id="records-count" aria-live="polite"></div>
+          </div>
           <div class="table-head"><span>Route</span><span>Departure Time</span><span>Order Time</span></div>
-          <div class="table-body"><div id="rows"></div></div>
+          <div class="table-body" id="table-body"><div id="rows"></div></div>
         </div>
       </aside>
 
