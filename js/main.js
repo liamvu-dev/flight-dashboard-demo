@@ -29,7 +29,7 @@ function syncFullscreenState() {
     btnFullscreen.classList.toggle('active', isFs);
     btnFullscreen.setAttribute('aria-pressed', String(isFs));
     btnFullscreen.setAttribute('aria-label', isFs ? 'Exit Fullscreen' : 'Enter Fullscreen');
-    btnFullscreen.setAttribute('title', isFs ? 'Exit Fullscreen (Esc / F)' : 'Enter Fullscreen (F)');
+    btnFullscreen.setAttribute('data-tooltip', isFs ? 'Exit Fullscreen (Esc / F)' : 'Enter Fullscreen (F)');
   }
 }
 
@@ -49,11 +49,69 @@ syncFullscreenState();
 addEventListener('keydown', (e) => {
   if (e.ctrlKey || e.metaKey || e.altKey) return;
   if (e.target && ['INPUT', 'TEXTAREA', 'SELECT'].includes(e.target.tagName)) return;
-  if (e.key.toLowerCase() === 'f') {
+  const key = e.key.toLowerCase();
+  if (key === 'f') {
     e.preventDefault();
     toggleFullscreen();
+  } else if (key === '1') {
+    e.preventDefault();
+    dashboardControls?.setLayout('classic');
+  } else if (key === '2') {
+    e.preventDefault();
+    dashboardControls?.setLayout('split');
+  } else if (key === '3') {
+    e.preventDefault();
+    dashboardControls?.setLayout('dock');
+  } else if (key === 'z') {
+    e.preventDefault();
+    dashboardControls?.toggleZen();
+  } else if (key === 'r') {
+    e.preventDefault();
+    dashboardControls?.toggleAutoRotate();
+  } else if (key === '0') {
+    e.preventDefault();
+    dashboardControls?.resetGlobeView();
   }
 });
+
+// ===================== Dashboard Prefs (early apply before Globe init) =====================
+const PREFS_KEY = 'onefly_dashboard_prefs_v1';
+const VALID_LAYOUTS = new Set(['classic', 'split', 'dock']);
+const DEFAULT_GLOBE_POV = { lat: 20, lng: 30, altitude: 1.46 };
+const appEl = $('#app');
+
+function loadDashboardPrefs() {
+  const defaults = { layout: 'classic', showLeft: true, showKpis: true, showRight: true, autoRotate: true };
+  try {
+    const raw = localStorage.getItem(PREFS_KEY);
+    if (!raw) return defaults;
+    const parsed = JSON.parse(raw);
+    return {
+      layout: VALID_LAYOUTS.has(parsed.layout) ? parsed.layout : defaults.layout,
+      showLeft: typeof parsed.showLeft === 'boolean' ? parsed.showLeft : defaults.showLeft,
+      showKpis: typeof parsed.showKpis === 'boolean' ? parsed.showKpis : defaults.showKpis,
+      showRight: typeof parsed.showRight === 'boolean' ? parsed.showRight : defaults.showRight,
+      autoRotate: typeof parsed.autoRotate === 'boolean' ? parsed.autoRotate : defaults.autoRotate,
+    };
+  } catch {
+    return defaults;
+  }
+}
+
+const dashboardPrefs = loadDashboardPrefs();
+let dashboardControls = null;
+
+function applyLayoutAttributes() {
+  if (!appEl) return;
+  const isZen = !dashboardPrefs.showLeft && !dashboardPrefs.showKpis && !dashboardPrefs.showRight;
+  appEl.dataset.layout = dashboardPrefs.layout;
+  appEl.dataset.hideLeft = String(!dashboardPrefs.showLeft);
+  appEl.dataset.hideKpis = String(!dashboardPrefs.showKpis);
+  appEl.dataset.hideRight = String(!dashboardPrefs.showRight);
+  appEl.dataset.zen = String(isZen);
+  appEl.dataset.globePaused = String(!dashboardPrefs.autoRotate);
+}
+applyLayoutAttributes();
 
 // ===================== Clock =====================
 const WEEK = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
@@ -142,7 +200,7 @@ if (captionEl) {
 }
 
 // Larger globe view filling the center stage
-world.pointOfView({ lat: 20, lng: 30, altitude: 1.46 }, 0);
+world.pointOfView(DEFAULT_GLOBE_POV, 0);
 world.renderer().setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
 
 // Enhance 4K satellite relief, anisotropic sharpness & balanced 3D shading
@@ -165,7 +223,7 @@ world.renderer().setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
   mat.needsUpdate = true;
 })();
 const controls = world.controls();
-controls.autoRotate = true;
+controls.autoRotate = dashboardPrefs.autoRotate;
 controls.autoRotateSpeed = -0.55; // rotate east -> west
 controls.enableZoom = false;
 
@@ -959,3 +1017,178 @@ setInterval(() => { kpi.sales.value += randInt(5, 60); }, 700);
 setInterval(() => { renderDonut(); renderBars(); }, 3000);
 setInterval(() => { if (Math.random() < 0.3) kpi.routes.value += 1; }, 5000);
 setInterval(() => { renderTopRoutes(); }, 4000);
+
+// ===================== Header Control Toolbar =====================
+(function initDashboardToolbar() {
+  const layoutBtns = Array.from(document.querySelectorAll('#control-toolbar [data-layout]'));
+  const btnToggleLeft = $('#btn-toggle-left');
+  const btnToggleKpis = $('#btn-toggle-kpis');
+  const btnToggleRight = $('#btn-toggle-right');
+  const btnToggleZen = $('#btn-toggle-zen');
+  const btnGlobeRotate = $('#btn-globe-rotate');
+  const btnGlobeReset = $('#btn-globe-reset');
+  const donutEl = $('#donut');
+  const barsEl = $('#bars');
+
+  let preZenState = null;
+  let resizeSyncTimer = null;
+
+  function savePrefs() {
+    try {
+      localStorage.setItem(PREFS_KEY, JSON.stringify(dashboardPrefs));
+    } catch {
+      // ignore storage errors in restricted environments
+    }
+  }
+
+  function syncVisualSizes() {
+    if (globeEl && globeEl.clientWidth > 0 && globeEl.clientHeight > 0) {
+      world.width(globeEl.clientWidth).height(globeEl.clientHeight);
+    }
+    if (donutEl && donutEl.clientWidth > 0 && donutEl.clientHeight > 0) {
+      donut.resize();
+    }
+    if (barsEl && barsEl.clientWidth > 0 && barsEl.clientHeight > 0) {
+      bars.resize();
+    }
+  }
+
+  function scheduleSizeSync() {
+    requestAnimationFrame(syncVisualSizes);
+    clearTimeout(resizeSyncTimer);
+    resizeSyncTimer = setTimeout(syncVisualSizes, 320);
+  }
+
+  function syncToolbarUI() {
+    applyLayoutAttributes();
+    const isZen = !dashboardPrefs.showLeft && !dashboardPrefs.showKpis && !dashboardPrefs.showRight;
+
+    for (const btn of layoutBtns) {
+      const active = btn.dataset.layout === dashboardPrefs.layout;
+      btn.classList.toggle('active', active);
+      btn.setAttribute('aria-pressed', String(active));
+    }
+
+    if (btnToggleLeft) {
+      btnToggleLeft.classList.toggle('active', dashboardPrefs.showLeft);
+      btnToggleLeft.setAttribute('aria-pressed', String(dashboardPrefs.showLeft));
+      const label = dashboardPrefs.showLeft ? 'Hide Left Panels' : 'Show Left Panels';
+      btnToggleLeft.setAttribute('aria-label', label);
+      btnToggleLeft.setAttribute('data-tooltip', label);
+    }
+
+    if (btnToggleKpis) {
+      btnToggleKpis.classList.toggle('active', dashboardPrefs.showKpis);
+      btnToggleKpis.setAttribute('aria-pressed', String(dashboardPrefs.showKpis));
+      const label = dashboardPrefs.showKpis ? 'Hide KPI Bar' : 'Show KPI Bar';
+      btnToggleKpis.setAttribute('aria-label', label);
+      btnToggleKpis.setAttribute('data-tooltip', label);
+    }
+
+    if (btnToggleRight) {
+      btnToggleRight.classList.toggle('active', dashboardPrefs.showRight);
+      btnToggleRight.setAttribute('aria-pressed', String(dashboardPrefs.showRight));
+      const label = dashboardPrefs.showRight ? 'Hide Right Panels' : 'Show Right Panels';
+      btnToggleRight.setAttribute('aria-label', label);
+      btnToggleRight.setAttribute('data-tooltip', label);
+    }
+
+    if (btnToggleZen) {
+      btnToggleZen.classList.toggle('active', isZen);
+      btnToggleZen.setAttribute('aria-pressed', String(isZen));
+      btnToggleZen.setAttribute('aria-label', isZen ? 'Exit Zen Globe Mode' : 'Toggle Zen Globe Mode');
+      btnToggleZen.setAttribute('data-tooltip', isZen ? 'Exit Zen Mode (Z)' : 'Zen Globe Mode (Z)');
+    }
+
+    if (btnGlobeRotate) {
+      btnGlobeRotate.classList.toggle('active', dashboardPrefs.autoRotate);
+      btnGlobeRotate.setAttribute('aria-pressed', String(dashboardPrefs.autoRotate));
+      btnGlobeRotate.setAttribute('aria-label', dashboardPrefs.autoRotate ? 'Pause Globe Rotation' : 'Resume Globe Rotation');
+      btnGlobeRotate.setAttribute('data-tooltip', dashboardPrefs.autoRotate ? 'Pause Globe Rotation (R)' : 'Resume Globe Rotation (R)');
+    }
+
+    controls.autoRotate = dashboardPrefs.autoRotate;
+  }
+
+  function setLayout(layout) {
+    if (!VALID_LAYOUTS.has(layout) || dashboardPrefs.layout === layout) return;
+    dashboardPrefs.layout = layout;
+    savePrefs();
+    syncToolbarUI();
+    scheduleSizeSync();
+  }
+
+  function togglePanel(key) {
+    preZenState = null;
+    dashboardPrefs[key] = !dashboardPrefs[key];
+    savePrefs();
+    syncToolbarUI();
+    scheduleSizeSync();
+  }
+
+  function toggleZen() {
+    const isZen = !dashboardPrefs.showLeft && !dashboardPrefs.showKpis && !dashboardPrefs.showRight;
+    if (!isZen) {
+      preZenState = {
+        showLeft: dashboardPrefs.showLeft,
+        showKpis: dashboardPrefs.showKpis,
+        showRight: dashboardPrefs.showRight,
+      };
+      dashboardPrefs.showLeft = false;
+      dashboardPrefs.showKpis = false;
+      dashboardPrefs.showRight = false;
+    } else {
+      const restore = preZenState && (preZenState.showLeft || preZenState.showKpis || preZenState.showRight)
+        ? preZenState
+        : { showLeft: true, showKpis: true, showRight: true };
+      dashboardPrefs.showLeft = restore.showLeft;
+      dashboardPrefs.showKpis = restore.showKpis;
+      dashboardPrefs.showRight = restore.showRight;
+      preZenState = null;
+    }
+    savePrefs();
+    syncToolbarUI();
+    scheduleSizeSync();
+  }
+
+  function toggleAutoRotate() {
+    dashboardPrefs.autoRotate = !dashboardPrefs.autoRotate;
+    savePrefs();
+    syncToolbarUI();
+  }
+
+  function resetGlobeView() {
+    if (controls.target && typeof controls.target.set === 'function') {
+      controls.target.set(0, 0, 0);
+    }
+    if (typeof controls.update === 'function') {
+      controls.update();
+    }
+    world.pointOfView(DEFAULT_GLOBE_POV, 900);
+    if (btnGlobeReset) {
+      btnGlobeReset.classList.add('active');
+      setTimeout(() => btnGlobeReset.classList.remove('active'), 320);
+    }
+  }
+
+  for (const btn of layoutBtns) {
+    btn.addEventListener('click', () => setLayout(btn.dataset.layout));
+  }
+  if (btnToggleLeft) btnToggleLeft.addEventListener('click', () => togglePanel('showLeft'));
+  if (btnToggleKpis) btnToggleKpis.addEventListener('click', () => togglePanel('showKpis'));
+  if (btnToggleRight) btnToggleRight.addEventListener('click', () => togglePanel('showRight'));
+  if (btnToggleZen) btnToggleZen.addEventListener('click', toggleZen);
+  if (btnGlobeRotate) btnGlobeRotate.addEventListener('click', toggleAutoRotate);
+  if (btnGlobeReset) btnGlobeReset.addEventListener('click', resetGlobeView);
+
+  if (typeof ResizeObserver === 'function') {
+    const ro = new ResizeObserver(() => requestAnimationFrame(syncVisualSizes));
+    if (globeEl) ro.observe(globeEl);
+    if (donutEl) ro.observe(donutEl);
+    if (barsEl) ro.observe(barsEl);
+  }
+
+  dashboardControls = { setLayout, toggleZen, toggleAutoRotate, resetGlobeView };
+  syncToolbarUI();
+  scheduleSizeSync();
+})();
