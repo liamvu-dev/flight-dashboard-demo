@@ -48,12 +48,279 @@ syncFullscreenState();
 
 addEventListener('keydown', (e) => {
   if (e.ctrlKey || e.metaKey || e.altKey) return;
-  if (e.target && ['INPUT', 'TEXTAREA', 'SELECT'].includes(e.target.tagName)) return;
-  if (e.key.toLowerCase() === 'f') {
+  if (e.target && (['INPUT', 'TEXTAREA', 'SELECT'].includes(e.target.tagName) || e.target.isContentEditable)) return;
+  const key = e.key.toLowerCase();
+  if (key === 'f') {
     e.preventDefault();
     toggleFullscreen();
+  } else if (key === 'z') {
+    e.preventDefault();
+    toggleZenMode();
+  } else if (key === 'escape' && panelState.zen) {
+    e.preventDefault();
+    setZenMode(false);
   }
 });
+
+// ===================== Panel Visibility & Zen Mode =====================
+const PANEL_STORAGE_KEY = 'onefly.panelVisibility.v1';
+const DEFAULT_PANEL_STATE = { left: true, right: true, kpis: true, zen: false };
+
+const appEl = $('#app');
+const headerEl = $('.header');
+const kpisEl = $('#kpis');
+const colLeftEl = $('#col-left');
+const colRightEl = $('#col-right');
+const btnToggleLeft = $('#btn-toggle-left');
+const btnToggleKpis = $('#btn-toggle-kpis');
+const btnToggleRight = $('#btn-toggle-right');
+const btnZen = $('#btn-zen');
+const btnZenRestore = $('#btn-zen-restore');
+
+function loadPanelVisibility() {
+  try {
+    const raw = localStorage.getItem(PANEL_STORAGE_KEY);
+    if (!raw) return { ...DEFAULT_PANEL_STATE };
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object') return { ...DEFAULT_PANEL_STATE };
+    return {
+      left: typeof parsed.left === 'boolean' ? parsed.left : true,
+      right: typeof parsed.right === 'boolean' ? parsed.right : true,
+      kpis: typeof parsed.kpis === 'boolean' ? parsed.kpis : true,
+      zen: typeof parsed.zen === 'boolean' ? parsed.zen : false,
+    };
+  } catch {
+    return { ...DEFAULT_PANEL_STATE };
+  }
+}
+
+function savePanelVisibility(state) {
+  try {
+    localStorage.setItem(PANEL_STORAGE_KEY, JSON.stringify({
+      left: Boolean(state.left),
+      right: Boolean(state.right),
+      kpis: Boolean(state.kpis),
+      zen: Boolean(state.zen),
+    }));
+  } catch {
+    // Ignore storage errors in restricted environments
+  }
+}
+
+const panelState = loadPanelVisibility();
+let lastGlobeW = 0;
+let lastGlobeH = 0;
+let transitionRafId = 0;
+let transitionTimeoutId = 0;
+let transitionCleanup = null;
+const LAYOUT_TRANSITION_PROPS = new Set(['width', 'height', 'margin-left', 'margin-right', 'margin-top', 'margin-bottom', 'padding-top', 'padding-bottom', 'padding-left', 'padding-right', 'left', 'right', 'top', 'bottom']);
+
+function resizeVisuals({ includeCharts = true } = {}) {
+  if (typeof world !== 'undefined' && typeof globeEl !== 'undefined' && globeEl) {
+    const w = globeEl.clientWidth;
+    const h = globeEl.clientHeight;
+    if (w > 0 && h > 0 && (w !== lastGlobeW || h !== lastGlobeH)) {
+      lastGlobeW = w;
+      lastGlobeH = h;
+      world.width(w).height(h);
+    }
+  }
+  if (includeCharts) {
+    if (typeof donut !== 'undefined' && donut) donut.resize();
+    if (typeof bars !== 'undefined' && bars) bars.resize();
+  }
+}
+
+function setRegionHidden(el, hidden) {
+  if (!el) return;
+  if (hidden && document.activeElement && el.contains(document.activeElement)) {
+    document.activeElement.blur();
+  }
+  el.setAttribute('aria-hidden', String(hidden));
+  el.inert = hidden;
+}
+
+function syncPanelToggleBtn(btn, visible, showLabel, hideLabel) {
+  if (!btn) return;
+  btn.classList.toggle('active', visible);
+  btn.setAttribute('aria-pressed', String(visible));
+  const label = visible ? hideLabel : showLabel;
+  btn.setAttribute('title', label);
+  btn.setAttribute('aria-label', label);
+}
+
+function syncPanelVisibilityUi() {
+  if (!appEl) return;
+  const { left, right, kpis, zen } = panelState;
+
+  appEl.classList.toggle('hide-left', !left);
+  appEl.classList.toggle('hide-right', !right);
+  appEl.classList.toggle('hide-kpis', !kpis);
+  appEl.classList.toggle('zen-mode', zen);
+
+  syncPanelToggleBtn(btnToggleLeft, left, 'Show Left Panels', 'Hide Left Panels');
+  syncPanelToggleBtn(btnToggleKpis, kpis, 'Show KPI Bar', 'Hide KPI Bar');
+  syncPanelToggleBtn(btnToggleRight, right, 'Show Right Panels', 'Hide Right Panels');
+
+  if (btnZen) {
+    btnZen.classList.toggle('active', zen);
+    btnZen.setAttribute('aria-pressed', String(zen));
+    btnZen.setAttribute('title', zen ? 'Exit Zen / Globe Focus Mode (Z / Esc)' : 'Zen / Globe Focus Mode (Z)');
+    btnZen.setAttribute('aria-label', zen ? 'Exit Zen / Globe Focus Mode' : 'Enter Zen / Globe Focus Mode');
+  }
+
+  setRegionHidden(headerEl, zen);
+  setRegionHidden(kpisEl, zen || !kpis);
+  setRegionHidden(colLeftEl, zen || !left);
+  setRegionHidden(colRightEl, zen || !right);
+
+  if (btnZenRestore) {
+    if (!zen && document.activeElement === btnZenRestore) {
+      btnZenRestore.blur();
+    }
+    btnZenRestore.setAttribute('aria-hidden', String(!zen));
+    btnZenRestore.tabIndex = zen ? 0 : -1;
+    btnZenRestore.inert = !zen;
+  }
+}
+
+function applyPanelVisibility({ immediate = false } = {}) {
+  if (!appEl) return;
+  const prefersReducedMotion = Boolean(window.matchMedia?.('(prefers-reduced-motion: reduce)').matches);
+
+  if (transitionCleanup) {
+    transitionCleanup();
+    transitionCleanup = null;
+  }
+  if (transitionRafId) {
+    cancelAnimationFrame(transitionRafId);
+    transitionRafId = 0;
+  }
+  if (transitionTimeoutId) {
+    clearTimeout(transitionTimeoutId);
+    transitionTimeoutId = 0;
+  }
+
+  if (immediate) {
+    appEl.classList.add('no-transitions');
+    syncPanelVisibilityUi();
+    void appEl.offsetWidth;
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => appEl.classList.remove('no-transitions'));
+    });
+    return;
+  }
+
+  if (prefersReducedMotion) {
+    syncPanelVisibilityUi();
+    appEl.classList.remove('is-transitioning');
+    resizeVisuals({ includeCharts: true });
+    return;
+  }
+
+  appEl.classList.add('is-transitioning');
+  syncPanelVisibilityUi();
+
+  const transitionTargets = [
+    appEl,
+    headerEl,
+    kpisEl,
+    colLeftEl,
+    colRightEl,
+    typeof globeEl !== 'undefined' ? globeEl : null,
+  ].filter(Boolean);
+
+  const hasRunningLayoutTransitions = () => transitionTargets.some((el) => {
+    if (typeof el.getAnimations !== 'function') return false;
+    return el.getAnimations().some((anim) => (
+      anim.playState === 'running'
+      && typeof anim.transitionProperty === 'string'
+      && LAYOUT_TRANSITION_PROPS.has(anim.transitionProperty)
+    ));
+  });
+
+  const startTime = performance.now();
+  let finished = false;
+  const finishTransition = () => {
+    if (finished) return;
+    finished = true;
+    if (transitionCleanup) {
+      transitionCleanup();
+      transitionCleanup = null;
+    }
+    if (transitionRafId) {
+      cancelAnimationFrame(transitionRafId);
+      transitionRafId = 0;
+    }
+    if (transitionTimeoutId) {
+      clearTimeout(transitionTimeoutId);
+      transitionTimeoutId = 0;
+    }
+    appEl.classList.remove('is-transitioning');
+    resizeVisuals({ includeCharts: true });
+  };
+
+  const onTransitionEnd = (e) => {
+    if (!transitionTargets.includes(e.target)) return;
+    if (!LAYOUT_TRANSITION_PROPS.has(e.propertyName)) return;
+    if (!hasRunningLayoutTransitions()) finishTransition();
+  };
+  appEl.addEventListener('transitionend', onTransitionEnd);
+  transitionCleanup = () => appEl.removeEventListener('transitionend', onTransitionEnd);
+
+  const trackTransitionResize = (now) => {
+    resizeVisuals({ includeCharts: false });
+    if (!finished && now - startTime < 8000) {
+      transitionRafId = requestAnimationFrame(trackTransitionResize);
+    } else {
+      transitionRafId = 0;
+    }
+  };
+  transitionRafId = requestAnimationFrame(trackTransitionResize);
+
+  const checkTransitionSettlement = () => {
+    if (finished) return;
+    const elapsed = performance.now() - startTime;
+    if (!hasRunningLayoutTransitions() || elapsed >= 8000) {
+      finishTransition();
+    } else {
+      transitionTimeoutId = setTimeout(checkTransitionSettlement, 150);
+    }
+  };
+  transitionTimeoutId = setTimeout(checkTransitionSettlement, 420);
+}
+
+function togglePanel(key) {
+  if (!(key in panelState) || key === 'zen') return;
+  panelState[key] = !panelState[key];
+  savePanelVisibility(panelState);
+  applyPanelVisibility();
+}
+
+function setZenMode(enabled) {
+  const next = Boolean(enabled);
+  if (panelState.zen === next) return;
+  panelState.zen = next;
+  savePanelVisibility(panelState);
+  applyPanelVisibility();
+}
+
+function toggleZenMode() {
+  setZenMode(!panelState.zen);
+}
+
+if (btnToggleLeft) btnToggleLeft.addEventListener('click', () => togglePanel('left'));
+if (btnToggleKpis) btnToggleKpis.addEventListener('click', () => togglePanel('kpis'));
+if (btnToggleRight) btnToggleRight.addEventListener('click', () => togglePanel('right'));
+if (btnZen) btnZen.addEventListener('click', toggleZenMode);
+if (btnZenRestore) {
+  btnZenRestore.addEventListener('click', () => {
+    setZenMode(false);
+    if (btnZen) btnZen.focus({ preventScroll: true });
+  });
+}
+
+applyPanelVisibility({ immediate: true });
 
 // ===================== Clock =====================
 const WEEK = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
@@ -132,6 +399,12 @@ const world = Globe({ rendererConfig: { preserveDrawingBuffer: true } })(globeEl
   .ringMaxRadius(4.2)
   .ringPropagationSpeed(2.6)
   .ringRepeatPeriod(650);
+lastGlobeW = globeEl.clientWidth;
+lastGlobeH = globeEl.clientHeight;
+if (typeof ResizeObserver === 'function' && globeEl) {
+  const globeResizeObserver = new ResizeObserver(() => resizeVisuals({ includeCharts: false }));
+  globeResizeObserver.observe(globeEl);
+}
 
 // Sync bottom legend pill with REGIONS colors + neon glow
 const captionEl = $('#globe-caption');
@@ -614,7 +887,7 @@ function addRing(ap) {
 }
 for (let i = 0; i < 65; i++) addArc(genBooking(), true);
 
-addEventListener('resize', () => world.width(globeEl.clientWidth).height(globeEl.clientHeight));
+addEventListener('resize', () => resizeVisuals({ includeCharts: true }));
 
 // ===================== Dashboard Snapshot (PNG) =====================
 const btnSnapshot = $('#btn-snapshot');
@@ -745,6 +1018,7 @@ function renderBars() {
   });
 }
 renderBars();
+resizeVisuals({ includeCharts: true });
 
 // ===================== Top Routes by region (rotating) =====================
 let routeRegionIdx = 0;
