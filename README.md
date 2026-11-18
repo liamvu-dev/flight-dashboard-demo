@@ -22,7 +22,8 @@
 
 - **Display & Responsive Design:**
   - Designed for 1920×1080 (LED wall / TV / monitor) with dynamic vector auto-scaling to fit any display aspect ratio.
-  - Fullscreen toggle with the `F` key.
+  - Fullscreen toggle via the header Fullscreen button or `F` key (with `Esc` exit support).
+  - One-click **Snapshot** button in the header to export the current 3D Globe view as a timestamped `.png` image (`onefly-snapshot-YYYYMMDD-HHmmss.png`).
   - Sci-fi cyberpunk HUD aesthetics with cyan/neon accents, chamfered corner panels, and starfield background.
 
 ## 🚀 Quick Start
