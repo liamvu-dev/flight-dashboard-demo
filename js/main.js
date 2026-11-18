@@ -19,6 +19,60 @@ function fit() {
 }
 addEventListener('resize', fit); fit();
 
+// ===================== Layout Presets & Persistence =====================
+const LAYOUT_STORAGE_KEY = 'onefly.layoutPreset';
+const SPLIT_TAB_STORAGE_KEY = 'onefly.splitTab';
+const VALID_LAYOUTS = ['classic', 'split', 'dock'];
+const VALID_SPLIT_TABS = ['dist', 'bars', 'routes'];
+const GLOBE_ALTITUDE_BY_LAYOUT = {
+  classic: 1.46,
+  split: 1.38,
+  dock: 1.35,
+};
+
+const appEl = $('#app');
+const layoutBtns = Array.from(document.querySelectorAll('.layout-btn'));
+const splitTabBtns = Array.from(document.querySelectorAll('.split-tab'));
+
+function readStorage(key) {
+  try {
+    return localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+
+function writeStorage(key, value) {
+  try {
+    localStorage.setItem(key, value);
+  } catch {
+    // Ignore storage errors (e.g., private mode / disabled storage)
+  }
+}
+
+const savedLayout = readStorage(LAYOUT_STORAGE_KEY);
+let currentLayout = VALID_LAYOUTS.includes(savedLayout) ? savedLayout : 'classic';
+const savedSplitTab = readStorage(SPLIT_TAB_STORAGE_KEY);
+let currentSplitTab = VALID_SPLIT_TABS.includes(savedSplitTab) ? savedSplitTab : 'dist';
+
+function syncLayoutUI() {
+  if (appEl) {
+    appEl.dataset.layout = currentLayout;
+    appEl.dataset.splitTab = currentSplitTab;
+  }
+  for (const btn of layoutBtns) {
+    const isActive = btn.dataset.layoutBtn === currentLayout;
+    btn.classList.toggle('active', isActive);
+    btn.setAttribute('aria-pressed', String(isActive));
+  }
+  for (const btn of splitTabBtns) {
+    const isActive = btn.dataset.splitTab === currentSplitTab;
+    btn.classList.toggle('active', isActive);
+    btn.setAttribute('aria-selected', String(isActive));
+  }
+}
+syncLayoutUI();
+
 // ===================== Fullscreen =====================
 const btnFullscreen = $('#btn-fullscreen');
 const getFullscreenElement = () => document.fullscreenElement || document.webkitFullscreenElement || null;
@@ -49,9 +103,19 @@ syncFullscreenState();
 addEventListener('keydown', (e) => {
   if (e.ctrlKey || e.metaKey || e.altKey) return;
   if (e.target && ['INPUT', 'TEXTAREA', 'SELECT'].includes(e.target.tagName)) return;
-  if (e.key.toLowerCase() === 'f') {
+  const key = e.key.toLowerCase();
+  if (key === 'f') {
     e.preventDefault();
     toggleFullscreen();
+  } else if (key === '1') {
+    e.preventDefault();
+    setLayout('classic');
+  } else if (key === '2') {
+    e.preventDefault();
+    setLayout('split');
+  } else if (key === '3') {
+    e.preventDefault();
+    setLayout('dock');
   }
 });
 
@@ -142,7 +206,7 @@ if (captionEl) {
 }
 
 // Larger globe view filling the center stage
-world.pointOfView({ lat: 20, lng: 30, altitude: 1.46 }, 0);
+world.pointOfView({ lat: 20, lng: 30, altitude: GLOBE_ALTITUDE_BY_LAYOUT[currentLayout] || 1.46 }, 0);
 world.renderer().setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
 
 // Enhance 4K satellite relief, anisotropic sharpness & balanced 3D shading
@@ -614,7 +678,7 @@ function addRing(ap) {
 }
 for (let i = 0; i < 65; i++) addArc(genBooking(), true);
 
-addEventListener('resize', () => world.width(globeEl.clientWidth).height(globeEl.clientHeight));
+addEventListener('resize', () => scheduleResize());
 
 // ===================== Dashboard Snapshot (PNG) =====================
 const btnSnapshot = $('#btn-snapshot');
@@ -695,12 +759,13 @@ if (btnSnapshot) btnSnapshot.addEventListener('click', captureSnapshot);
 // ===================== Donut: Global Route Distribution =====================
 const donut = echarts.init($('#donut'));
 function renderDonut() {
+  const isDock = currentLayout === 'dock';
   const total = regionKeys.reduce((s, r) => s + regionCounts[r], 0);
   const data = regionKeys.map((r) => ({ name: r, value: regionCounts[r], itemStyle: { color: REGIONS[r].color } }));
   donut.setOption({
     title: {
       text: 'Partner\nAirlines', left: 'center', top: 'center',
-      textStyle: { color: '#e8f8ff', fontFamily: 'Rajdhani', fontWeight: 700, fontSize: 18, lineHeight: 20 },
+      textStyle: { color: '#e8f8ff', fontFamily: 'Rajdhani', fontWeight: 700, fontSize: isDock ? 15 : 18, lineHeight: isDock ? 17 : 20 },
     },
     series: [
       { type: 'pie', radius: ['86%', '88%'], silent: true, label: { show: false }, data: [{ value: 1, itemStyle: { color: 'rgba(31,209,249,.35)' } }] },
@@ -720,17 +785,19 @@ renderDonut();
 // ===================== Bars: Top 10 Airlines =====================
 const bars = echarts.init($('#bars'));
 function renderBars() {
+  const isDock = currentLayout === 'dock';
+  const isSplit = currentLayout === 'split';
   const top = AIRLINES.map((a) => ({ ...a, v: airlineCounts[a.code] })).sort((a, b) => b.v - a.v).slice(0, 10);
   bars.setOption({
-    grid: { left: 44, right: 70, top: 6, bottom: 0 },
+    grid: isDock ? { left: 40, right: 62, top: 4, bottom: 2 } : { left: 44, right: 70, top: 6, bottom: 0 },
     xAxis: { type: 'value', show: false, max: (v) => v.max * 1.02 },
     yAxis: {
       type: 'category', inverse: true, data: top.map((a) => a.code),
       axisLine: { show: false }, axisTick: { show: false },
-      axisLabel: { color: '#cfe9ff', fontFamily: 'Orbitron', fontSize: 14 },
+      axisLabel: { color: '#cfe9ff', fontFamily: 'Orbitron', fontSize: isDock ? 12 : 14 },
     },
     series: [{
-      type: 'bar', barWidth: 13, showBackground: true,
+      type: 'bar', barWidth: isDock ? 10 : (isSplit ? 12 : 13), showBackground: true,
       backgroundStyle: { color: 'rgba(255,255,255,.06)', borderRadius: 7 },
       data: top.map((a) => ({
         value: a.v,
@@ -739,12 +806,93 @@ function renderBars() {
           color: new echarts.graphic.LinearGradient(0, 0, 1, 0, [{ offset: 0, color: a.color[0] + '55' }, { offset: 1, color: a.color[1] }]),
         },
       })),
-      label: { show: true, position: 'right', color: '#fff', fontFamily: 'Share Tech Mono', fontSize: 15, formatter: (p) => p.value.toLocaleString('en-US') },
+      label: { show: true, position: 'right', color: '#fff', fontFamily: 'Share Tech Mono', fontSize: isDock ? 12.5 : 15, formatter: (p) => p.value.toLocaleString('en-US') },
       animationDurationUpdate: 900,
     }],
   });
 }
 renderBars();
+
+// ===================== Layout Switching & Smooth Resize =====================
+const donutEl = $('#donut');
+const barsEl = $('#bars');
+let resizeRaf = 0;
+let lastGlobeWidth = 0;
+let lastGlobeHeight = 0;
+
+function resizeVisualizations() {
+  resizeRaf = 0;
+  if (globeEl) {
+    const gw = globeEl.clientWidth;
+    const gh = globeEl.clientHeight;
+    if (gw > 0 && gh > 0 && (gw !== lastGlobeWidth || gh !== lastGlobeHeight)) {
+      lastGlobeWidth = gw;
+      lastGlobeHeight = gh;
+      world.width(gw).height(gh);
+    }
+  }
+  if (donutEl && donutEl.clientWidth > 0 && donutEl.clientHeight > 0) {
+    donut.resize();
+    renderDonut();
+  }
+  if (barsEl && barsEl.clientWidth > 0 && barsEl.clientHeight > 0) {
+    bars.resize();
+    renderBars();
+  }
+}
+
+function scheduleResize() {
+  if (resizeRaf) cancelAnimationFrame(resizeRaf);
+  resizeRaf = requestAnimationFrame(resizeVisualizations);
+}
+
+function setLayout(preset, { animateGlobe = true, persist = true } = {}) {
+  const next = VALID_LAYOUTS.includes(preset) ? preset : 'classic';
+  const changed = next !== currentLayout;
+  currentLayout = next;
+  syncLayoutUI();
+  if (persist) writeStorage(LAYOUT_STORAGE_KEY, currentLayout);
+
+  if (changed) {
+    const pov = world.pointOfView();
+    const altitude = GLOBE_ALTITUDE_BY_LAYOUT[currentLayout] || 1.46;
+    world.pointOfView({ lat: pov.lat, lng: pov.lng, altitude }, animateGlobe ? 450 : 0);
+  }
+  scheduleResize();
+}
+
+function setSplitTab(tab, { persist = true } = {}) {
+  const next = VALID_SPLIT_TABS.includes(tab) ? tab : 'dist';
+  currentSplitTab = next;
+  syncLayoutUI();
+  if (persist) writeStorage(SPLIT_TAB_STORAGE_KEY, currentSplitTab);
+  scheduleResize();
+}
+
+for (const btn of layoutBtns) {
+  btn.addEventListener('click', () => setLayout(btn.dataset.layoutBtn));
+}
+
+for (const btn of splitTabBtns) {
+  btn.addEventListener('click', () => setSplitTab(btn.dataset.splitTab));
+  btn.addEventListener('keydown', (e) => {
+    if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+    e.preventDefault();
+    const idx = splitTabBtns.indexOf(btn);
+    const step = e.key === 'ArrowRight' ? 1 : -1;
+    const target = splitTabBtns[(idx + step + splitTabBtns.length) % splitTabBtns.length];
+    target.focus();
+    setSplitTab(target.dataset.splitTab);
+  });
+}
+
+if (typeof ResizeObserver !== 'undefined') {
+  const ro = new ResizeObserver(() => scheduleResize());
+  if (globeEl) ro.observe(globeEl);
+  if (donutEl) ro.observe(donutEl);
+  if (barsEl) ro.observe(barsEl);
+}
+scheduleResize();
 
 // ===================== Top Routes by region (rotating) =====================
 let routeRegionIdx = 0;

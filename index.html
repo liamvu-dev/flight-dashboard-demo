@@ -13,12 +13,41 @@
 </head>
 <body>
   <div id="stars"></div>
-  <div id="app">
+  <div id="app" data-layout="classic" data-split-tab="dist">
     <!-- HEADER -->
     <header class="header">
-      <div class="logo">
-        <svg viewBox="0 0 40 40" width="38" height="38"><path d="M20 3a17 17 0 1 0 17 17h-7a10 10 0 1 1-10-10z" fill="none" stroke="#1fd1f9" stroke-width="4"/><path d="M24 8l12-4-4 12-3-5z" fill="#1fd1f9"/></svg>
-        <span>onefly</span>
+      <div class="header-left">
+        <div class="logo">
+          <svg viewBox="0 0 40 40" width="38" height="38"><path d="M20 3a17 17 0 1 0 17 17h-7a10 10 0 1 1-10-10z" fill="none" stroke="#1fd1f9" stroke-width="4"/><path d="M24 8l12-4-4 12-3-5z" fill="#1fd1f9"/></svg>
+          <span>onefly</span>
+        </div>
+        <div class="layout-switcher" role="group" aria-label="Dashboard Layout Presets">
+          <button type="button" class="layout-btn active" data-layout-btn="classic" title="Classic 3-Column Layout (1)" aria-pressed="true">
+            <svg viewBox="0 0 18 14" width="16" height="12" fill="none" stroke="currentColor" stroke-width="1.3" aria-hidden="true">
+              <rect x="0.75" y="0.75" width="3.5" height="12.5" rx="0.8" />
+              <circle cx="9" cy="7" r="3.2" />
+              <rect x="13.75" y="0.75" width="3.5" height="12.5" rx="0.8" />
+            </svg>
+            <span>Classic</span>
+          </button>
+          <button type="button" class="layout-btn" data-layout-btn="split" title="Split Focus Layout (2)" aria-pressed="false">
+            <svg viewBox="0 0 18 14" width="16" height="12" fill="none" stroke="currentColor" stroke-width="1.3" aria-hidden="true">
+              <rect x="0.75" y="0.75" width="9.5" height="12.5" rx="0.8" />
+              <rect x="12" y="0.75" width="5.25" height="5.5" rx="0.8" />
+              <rect x="12" y="7.75" width="5.25" height="5.5" rx="0.8" />
+            </svg>
+            <span>Split</span>
+          </button>
+          <button type="button" class="layout-btn" data-layout-btn="dock" title="Bottom Dock Layout (3)" aria-pressed="false">
+            <svg viewBox="0 0 18 14" width="16" height="12" fill="none" stroke="currentColor" stroke-width="1.3" aria-hidden="true">
+              <rect x="0.75" y="0.75" width="16.5" height="7.5" rx="0.8" />
+              <rect x="0.75" y="9.75" width="4.6" height="3.5" rx="0.6" />
+              <rect x="6.7" y="9.75" width="4.6" height="3.5" rx="0.6" />
+              <rect x="12.65" y="9.75" width="4.6" height="3.5" rx="0.6" />
+            </svg>
+            <span>Dock</span>
+          </button>
+        </div>
       </div>
       <div class="header-line left"><i></i></div>
       <div class="title-wrap">
@@ -64,8 +93,13 @@
 
     <!-- BODY -->
     <main class="body">
+      <div class="split-tabs" role="tablist" aria-label="Analytics Panels">
+        <button type="button" class="split-tab active" role="tab" data-split-tab="dist" aria-selected="true">Route Distribution</button>
+        <button type="button" class="split-tab" role="tab" data-split-tab="bars" aria-selected="false">Top 10 Airlines</button>
+        <button type="button" class="split-tab" role="tab" data-split-tab="routes" aria-selected="false">Top Routes</button>
+      </div>
       <aside class="col left">
-        <div class="panel" style="height:300px">
+        <div class="panel panel-dist">
           <div class="panel-title"><span>Global Route Distribution</span></div>
           <div class="dist">
             <div class="legend" id="legend-left"></div>
@@ -73,7 +107,7 @@
             <div class="legend" id="legend-right"></div>
           </div>
         </div>
-        <div class="panel grow">
+        <div class="panel panel-records grow">
           <div class="panel-title panel-title--records">
             <span>Route Booking Records</span>
             <div class="live-controls">
@@ -119,11 +153,11 @@
       </section>
 
       <aside class="col right">
-        <div class="panel" style="height:430px">
+        <div class="panel panel-bars">
           <div class="panel-title"><span>Top 10 Airlines by Orders</span></div>
           <div id="bars"></div>
         </div>
-        <div class="panel grow">
+        <div class="panel panel-routes grow">
           <div class="panel-title"><span id="routes-title">Top Routes – Asia</span></div>
           <div id="top-routes"></div>
         </div>
