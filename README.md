@@ -21,7 +21,7 @@
   - **Top Routes by Region:** Ranked leaderboard with gold/silver/bronze badges and progress bars, automatically rotating through continental regions every 10 seconds.
 
 - **Display & Responsive Design:**
-  - Designed for 1920×1080 (LED wall / TV / monitor) with dynamic vector auto-scaling to fit any display aspect ratio.
+  - Responsive layout with three columns on desktop, a full-width globe above two panel columns on tablet, and a single scrolling column on mobile.
   - Fullscreen toggle via the header Fullscreen button or `F` key (with `Esc` exit support).
   - One-click **Snapshot** button in the header to export the current 3D Globe view as a timestamped `.png` image (`onefly-snapshot-YYYYMMDD-HHmmss.png`).
   - Sci-fi cyberpunk HUD aesthetics with cyan/neon accents, chamfered corner panels, and starfield background.
