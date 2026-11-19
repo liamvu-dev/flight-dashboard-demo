@@ -1,0 +1,45 @@
+name: Feature Task (Agent-Ready)
+description: Create a structured feature task ready for Codex / Orca execution
+title: "feat: "
+labels: ["enhancement", "ui-ux"]
+assignees:
+  - liamvu-dev
+body:
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: Brief description of the feature or UI improvement
+      placeholder: What should this feature do?
+    validations:
+      required: true
+
+  - type: input
+    id: files
+    attributes:
+      label: Related Files
+      description: Key files likely involved
+      placeholder: index.html, css/style.css, js/main.js
+
+  - type: textarea
+    id: requirements
+    attributes:
+      label: Requirements
+      description: Specific technical or UI requirements
+      value: |
+        - 
+        - 
+    validations:
+      required: true
+
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance Criteria
+      description: How to verify the task is complete
+      value: |
+        - [ ] Works across desktop and mobile viewports without overflow
+        - [ ] Preserves the existing sci-fi/cyberpunk theme (`Orbitron`, `#1fd1f9`)
+        - [ ] `node --check js/main.js` passes with no console errors
+    validations:
+      required: true
