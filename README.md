@@ -37,6 +37,10 @@ python -m http.server 8080
 ```
 Then navigate to [http://localhost:8080](http://localhost:8080).
 
+## Rebuilding in an existing app
+
+Use the [flight dashboard rebuild guide](docs/rebuild-flight-dashboard.md) for the source map, data contracts, integration steps, and parity checks.
+
 ## 🛠️ Tech Stack
 
 - **Three.js** & **globe.gl** – 3D earth rendering, flight curves & 3D aircraft models.
