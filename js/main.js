@@ -29,7 +29,7 @@ function syncFullscreenState() {
     btnFullscreen.classList.toggle('active', isFs);
     btnFullscreen.setAttribute('aria-pressed', String(isFs));
     btnFullscreen.setAttribute('aria-label', isFs ? 'Exit Fullscreen' : 'Enter Fullscreen');
-    btnFullscreen.setAttribute('title', isFs ? 'Exit Fullscreen (Esc / F)' : 'Enter Fullscreen (F)');
+    btnFullscreen.setAttribute('data-tooltip', isFs ? 'Exit Fullscreen (Esc / F)' : 'Enter Fullscreen (F)');
   }
 }
 
@@ -53,10 +53,25 @@ addEventListener('keydown', (e) => {
   if (key === 'f') {
     e.preventDefault();
     toggleFullscreen();
+  } else if (key === '1') {
+    e.preventDefault();
+    setLayout('classic');
+  } else if (key === '2') {
+    e.preventDefault();
+    setLayout('split');
+  } else if (key === '3') {
+    e.preventDefault();
+    setLayout('dock');
   } else if (key === 'z') {
     e.preventDefault();
     toggleZenMode();
-  } else if (key === 'escape' && panelState.zen) {
+  } else if (key === 'r') {
+    e.preventDefault();
+    toggleAutoRotate();
+  } else if (key === '0') {
+    e.preventDefault();
+    resetGlobeView();
+  } else if (key === 'escape' && dashboardPrefs.zen) {
     e.preventDefault();
     setZenMode(false);
   } else if (key === 'escape' && selectedRegion && !getFullscreenElement()) {
@@ -64,52 +79,73 @@ addEventListener('keydown', (e) => {
   }
 });
 
-// ===================== Panel Visibility & Zen Mode =====================
-const PANEL_STORAGE_KEY = 'onefly.panelVisibility.v1';
-const DEFAULT_PANEL_STATE = { left: true, right: true, kpis: true, zen: false };
+// ===================== Dashboard Layout, Panel Visibility & Zen Mode =====================
+const PREFS_KEY = 'onefly_dashboard_prefs_v1';
+const VALID_LAYOUTS = new Set(['classic', 'split', 'dock']);
+const DEFAULT_DASHBOARD_PREFS = {
+  layout: 'classic',
+  showLeft: true,
+  showKpis: true,
+  showRight: true,
+  zen: false,
+  autoRotate: true,
+};
 
 const appEl = $('#app');
 const headerEl = $('.header');
 const kpisEl = $('#kpis');
 const colLeftEl = $('#col-left');
 const colRightEl = $('#col-right');
+const layoutBtns = Array.from(document.querySelectorAll('#control-toolbar [data-layout]'));
 const btnToggleLeft = $('#btn-toggle-left');
 const btnToggleKpis = $('#btn-toggle-kpis');
 const btnToggleRight = $('#btn-toggle-right');
-const btnZen = $('#btn-zen');
+const btnToggleZen = $('#btn-toggle-zen');
 const btnZenRestore = $('#btn-zen-restore');
+const btnGlobeRotate = $('#btn-globe-rotate');
+const btnGlobeReset = $('#btn-globe-reset');
 
-function loadPanelVisibility() {
+function loadDashboardPrefs() {
   try {
-    const raw = localStorage.getItem(PANEL_STORAGE_KEY);
-    if (!raw) return { ...DEFAULT_PANEL_STATE };
+    const raw = localStorage.getItem(PREFS_KEY);
+    if (!raw) return { ...DEFAULT_DASHBOARD_PREFS };
     const parsed = JSON.parse(raw);
-    if (!parsed || typeof parsed !== 'object') return { ...DEFAULT_PANEL_STATE };
+    if (!parsed || typeof parsed !== 'object') return { ...DEFAULT_DASHBOARD_PREFS };
     return {
-      left: typeof parsed.left === 'boolean' ? parsed.left : true,
-      right: typeof parsed.right === 'boolean' ? parsed.right : true,
-      kpis: typeof parsed.kpis === 'boolean' ? parsed.kpis : true,
-      zen: typeof parsed.zen === 'boolean' ? parsed.zen : false,
+      layout: VALID_LAYOUTS.has(parsed.layout) ? parsed.layout : DEFAULT_DASHBOARD_PREFS.layout,
+      showLeft: typeof parsed.showLeft === 'boolean' ? parsed.showLeft : DEFAULT_DASHBOARD_PREFS.showLeft,
+      showKpis: typeof parsed.showKpis === 'boolean' ? parsed.showKpis : DEFAULT_DASHBOARD_PREFS.showKpis,
+      showRight: typeof parsed.showRight === 'boolean' ? parsed.showRight : DEFAULT_DASHBOARD_PREFS.showRight,
+      zen: typeof parsed.zen === 'boolean' ? parsed.zen : DEFAULT_DASHBOARD_PREFS.zen,
+      autoRotate: typeof parsed.autoRotate === 'boolean' ? parsed.autoRotate : DEFAULT_DASHBOARD_PREFS.autoRotate,
     };
   } catch {
-    return { ...DEFAULT_PANEL_STATE };
+    return { ...DEFAULT_DASHBOARD_PREFS };
   }
 }
 
-function savePanelVisibility(state) {
+function saveDashboardPrefs() {
   try {
-    localStorage.setItem(PANEL_STORAGE_KEY, JSON.stringify({
-      left: Boolean(state.left),
-      right: Boolean(state.right),
-      kpis: Boolean(state.kpis),
-      zen: Boolean(state.zen),
+    localStorage.setItem(PREFS_KEY, JSON.stringify({
+      layout: dashboardPrefs.layout,
+      showLeft: Boolean(dashboardPrefs.showLeft),
+      showKpis: Boolean(dashboardPrefs.showKpis),
+      showRight: Boolean(dashboardPrefs.showRight),
+      zen: Boolean(dashboardPrefs.zen),
+      autoRotate: Boolean(dashboardPrefs.autoRotate),
     }));
   } catch {
     // Ignore storage errors in restricted environments
   }
 }
 
-const panelState = loadPanelVisibility();
+const dashboardPrefs = loadDashboardPrefs();
+let globeEl = null;
+let world = null;
+let controls = null;
+let donut = null;
+let bars = null;
+let selectedRegion = null;
 let lastGlobeW = 0;
 let lastGlobeH = 0;
 let transitionRafId = 0;
@@ -118,7 +154,7 @@ let transitionCleanup = null;
 const LAYOUT_TRANSITION_PROPS = new Set(['width', 'height', 'margin-left', 'margin-right', 'margin-top', 'margin-bottom', 'padding-top', 'padding-bottom', 'padding-left', 'padding-right', 'left', 'right', 'top', 'bottom']);
 
 function resizeVisuals({ includeCharts = true } = {}) {
-  if (typeof world !== 'undefined' && typeof globeEl !== 'undefined' && globeEl) {
+  if (world && globeEl) {
     const w = globeEl.clientWidth;
     const h = globeEl.clientHeight;
     if (w > 0 && h > 0 && (w !== lastGlobeW || h !== lastGlobeH)) {
@@ -128,8 +164,8 @@ function resizeVisuals({ includeCharts = true } = {}) {
     }
   }
   if (includeCharts) {
-    if (typeof donut !== 'undefined' && donut) donut.resize();
-    if (typeof bars !== 'undefined' && bars) bars.resize();
+    if (donut) donut.resize();
+    if (bars) bars.resize();
   }
 }
 
@@ -147,34 +183,53 @@ function syncPanelToggleBtn(btn, visible, showLabel, hideLabel) {
   btn.classList.toggle('active', visible);
   btn.setAttribute('aria-pressed', String(visible));
   const label = visible ? hideLabel : showLabel;
-  btn.setAttribute('title', label);
+  btn.setAttribute('data-tooltip', label);
   btn.setAttribute('aria-label', label);
 }
 
 function syncPanelVisibilityUi() {
   if (!appEl) return;
-  const { left, right, kpis, zen } = panelState;
+  const { layout, showLeft, showRight, showKpis, zen, autoRotate } = dashboardPrefs;
 
-  appEl.classList.toggle('hide-left', !left);
-  appEl.classList.toggle('hide-right', !right);
-  appEl.classList.toggle('hide-kpis', !kpis);
+  appEl.dataset.layout = layout;
+  appEl.dataset.globePaused = String(!autoRotate);
+  appEl.classList.toggle('hide-left', !showLeft);
+  appEl.classList.toggle('hide-right', !showRight);
+  appEl.classList.toggle('hide-kpis', !showKpis);
   appEl.classList.toggle('zen-mode', zen);
 
-  syncPanelToggleBtn(btnToggleLeft, left, 'Show Left Panels', 'Hide Left Panels');
-  syncPanelToggleBtn(btnToggleKpis, kpis, 'Show KPI Bar', 'Hide KPI Bar');
-  syncPanelToggleBtn(btnToggleRight, right, 'Show Right Panels', 'Hide Right Panels');
+  for (const btn of layoutBtns) {
+    const active = btn.dataset.layout === layout;
+    btn.classList.toggle('active', active);
+    btn.setAttribute('aria-pressed', String(active));
+  }
 
-  if (btnZen) {
-    btnZen.classList.toggle('active', zen);
-    btnZen.setAttribute('aria-pressed', String(zen));
-    btnZen.setAttribute('title', zen ? 'Exit Zen / Globe Focus Mode (Z / Esc)' : 'Zen / Globe Focus Mode (Z)');
-    btnZen.setAttribute('aria-label', zen ? 'Exit Zen / Globe Focus Mode' : 'Enter Zen / Globe Focus Mode');
+  syncPanelToggleBtn(btnToggleLeft, showLeft, 'Show Left Panels', 'Hide Left Panels');
+  syncPanelToggleBtn(btnToggleKpis, showKpis, 'Show KPI Bar', 'Hide KPI Bar');
+  syncPanelToggleBtn(btnToggleRight, showRight, 'Show Right Panels', 'Hide Right Panels');
+
+  if (btnToggleZen) {
+    btnToggleZen.classList.toggle('active', zen);
+    btnToggleZen.setAttribute('aria-pressed', String(zen));
+    btnToggleZen.setAttribute('data-tooltip', zen ? 'Exit Zen Mode (Z / Esc)' : 'Zen Globe Mode (Z)');
+    btnToggleZen.setAttribute('aria-label', zen ? 'Exit Zen / Globe Focus Mode' : 'Enter Zen / Globe Focus Mode');
+  }
+
+  if (btnGlobeRotate) {
+    btnGlobeRotate.classList.toggle('active', autoRotate);
+    btnGlobeRotate.setAttribute('aria-pressed', String(autoRotate));
+    btnGlobeRotate.setAttribute('data-tooltip', autoRotate ? 'Pause Globe Rotation (R)' : 'Resume Globe Rotation (R)');
+    btnGlobeRotate.setAttribute('aria-label', autoRotate ? 'Pause Globe Rotation' : 'Resume Globe Rotation');
+  }
+
+  if (controls && !selectedRegion) {
+    controls.autoRotate = autoRotate;
   }
 
   setRegionHidden(headerEl, zen);
-  setRegionHidden(kpisEl, zen || !kpis);
-  setRegionHidden(colLeftEl, zen || !left);
-  setRegionHidden(colRightEl, zen || !right);
+  setRegionHidden(kpisEl, zen || !showKpis);
+  setRegionHidden(colLeftEl, zen || !showLeft);
+  setRegionHidden(colRightEl, zen || !showRight);
 
   if (btnZenRestore) {
     if (!zen && document.activeElement === btnZenRestore) {
@@ -229,7 +284,7 @@ function applyPanelVisibility({ immediate = false } = {}) {
     kpisEl,
     colLeftEl,
     colRightEl,
-    typeof globeEl !== 'undefined' ? globeEl : null,
+    globeEl,
   ].filter(Boolean);
 
   const hasRunningLayoutTransitions = () => transitionTargets.some((el) => {
@@ -292,35 +347,76 @@ function applyPanelVisibility({ immediate = false } = {}) {
   transitionTimeoutId = setTimeout(checkTransitionSettlement, 420);
 }
 
-function togglePanel(key) {
-  if (!(key in panelState) || key === 'zen') return;
-  panelState[key] = !panelState[key];
-  savePanelVisibility(panelState);
+function setLayout(layout) {
+  if (!VALID_LAYOUTS.has(layout) || dashboardPrefs.layout === layout) return;
+  dashboardPrefs.layout = layout;
+  saveDashboardPrefs();
   applyPanelVisibility();
+  requestAnimationFrame(() => resizeVisuals({ includeCharts: true }));
+}
+
+function togglePanel(key) {
+  if (!['showLeft', 'showKpis', 'showRight'].includes(key)) return;
+  dashboardPrefs[key] = !dashboardPrefs[key];
+  saveDashboardPrefs();
+  applyPanelVisibility();
+  requestAnimationFrame(() => resizeVisuals({ includeCharts: true }));
 }
 
 function setZenMode(enabled) {
   const next = Boolean(enabled);
-  if (panelState.zen === next) return;
-  panelState.zen = next;
-  savePanelVisibility(panelState);
+  if (dashboardPrefs.zen === next) return;
+  dashboardPrefs.zen = next;
+  saveDashboardPrefs();
   applyPanelVisibility();
 }
 
 function toggleZenMode() {
-  setZenMode(!panelState.zen);
+  setZenMode(!dashboardPrefs.zen);
 }
 
-if (btnToggleLeft) btnToggleLeft.addEventListener('click', () => togglePanel('left'));
-if (btnToggleKpis) btnToggleKpis.addEventListener('click', () => togglePanel('kpis'));
-if (btnToggleRight) btnToggleRight.addEventListener('click', () => togglePanel('right'));
-if (btnZen) btnZen.addEventListener('click', toggleZenMode);
+function toggleAutoRotate() {
+  dashboardPrefs.autoRotate = !dashboardPrefs.autoRotate;
+  saveDashboardPrefs();
+  if (controls) {
+    controls.autoRotate = dashboardPrefs.autoRotate;
+  }
+  syncPanelVisibilityUi();
+}
+
+function resetGlobeView() {
+  if (controls) {
+    if (controls.target && typeof controls.target.set === 'function') {
+      controls.target.set(0, 0, 0);
+    }
+    if (typeof controls.update === 'function') {
+      controls.update();
+    }
+  }
+  if (world) {
+    world.pointOfView(DEFAULT_POV, 900);
+  }
+  if (btnGlobeReset) {
+    btnGlobeReset.classList.add('active');
+    setTimeout(() => btnGlobeReset.classList.remove('active'), 320);
+  }
+}
+
+for (const btn of layoutBtns) {
+  btn.addEventListener('click', () => setLayout(btn.dataset.layout));
+}
+if (btnToggleLeft) btnToggleLeft.addEventListener('click', () => togglePanel('showLeft'));
+if (btnToggleKpis) btnToggleKpis.addEventListener('click', () => togglePanel('showKpis'));
+if (btnToggleRight) btnToggleRight.addEventListener('click', () => togglePanel('showRight'));
+if (btnToggleZen) btnToggleZen.addEventListener('click', toggleZenMode);
 if (btnZenRestore) {
   btnZenRestore.addEventListener('click', () => {
     setZenMode(false);
-    if (btnZen) btnZen.focus({ preventScroll: true });
+    if (btnToggleZen) btnToggleZen.focus({ preventScroll: true });
   });
 }
+if (btnGlobeRotate) btnGlobeRotate.addEventListener('click', toggleAutoRotate);
+if (btnGlobeReset) btnGlobeReset.addEventListener('click', resetGlobeView);
 
 applyPanelVisibility({ immediate: true });
 
@@ -366,7 +462,7 @@ const REGION_COORDS = {
   Oceania:  { lat: -28, lng: 145, altitude: 1.46 },
 };
 const DEFAULT_POV = { lat: 20, lng: 30, altitude: 1.46 };
-let selectedRegion = null;
+selectedRegion = null;
 
 function genBooking(forcedRegion = null) {
   const region = forcedRegion || weightedPick(regionKeys.map((r) => [r, REGIONS[r].weight]));
@@ -396,10 +492,10 @@ for (const r of regionKeys) {
 }
 
 // ===================== Globe =====================
-const globeEl = $('#globe');
+globeEl = $('#globe');
 const arcs = [];
 const rings = [];
-const world = Globe({ rendererConfig: { preserveDrawingBuffer: true } })(globeEl)
+world = Globe({ rendererConfig: { preserveDrawingBuffer: true } })(globeEl)
   .width(globeEl.clientWidth)
   .height(globeEl.clientHeight)
   .backgroundColor('rgba(0,0,0,0)')
@@ -477,8 +573,8 @@ world.renderer().setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
   mat.shininess = 18;
   mat.needsUpdate = true;
 })();
-const controls = world.controls();
-controls.autoRotate = true;
+controls = world.controls();
+controls.autoRotate = dashboardPrefs.autoRotate;
 controls.autoRotateSpeed = -0.55; // rotate east -> west
 controls.enableZoom = false;
 
@@ -1057,7 +1153,7 @@ function captureSnapshot() {
 if (btnSnapshot) btnSnapshot.addEventListener('click', captureSnapshot);
 
 // ===================== Donut: Global Route Distribution =====================
-const donut = echarts.init($('#donut'));
+donut = echarts.init($('#donut'));
 function renderDonut() {
   const total = regionKeys.reduce((s, r) => s + regionCounts[r], 0);
   const data = regionKeys.map((r) => {
@@ -1128,7 +1224,7 @@ for (const legendEl of [$('#legend-left'), $('#legend-right')]) {
 }
 
 // ===================== Bars: Top 10 Airlines =====================
-const bars = echarts.init($('#bars'));
+bars = echarts.init($('#bars'));
 function renderBars() {
   const top = AIRLINES.map((a) => ({ ...a, v: airlineCounts[a.code] })).sort((a, b) => b.v - a.v).slice(0, 10);
   bars.setOption({
@@ -1156,6 +1252,11 @@ function renderBars() {
 }
 renderBars();
 resizeVisuals({ includeCharts: true });
+if (typeof ResizeObserver === 'function') {
+  const chartResizeObserver = new ResizeObserver(() => requestAnimationFrame(() => resizeVisuals({ includeCharts: true })));
+  if ($('#donut')) chartResizeObserver.observe($('#donut'));
+  if ($('#bars')) chartResizeObserver.observe($('#bars'));
+}
 
 // ===================== Top Routes by region (rotating) =====================
 let routeRegionIdx = 0;
@@ -1410,7 +1511,7 @@ function selectRegion(region) {
     controls.autoRotate = false;
     world.pointOfView(REGION_COORDS[selectedRegion], 850);
   } else {
-    controls.autoRotate = true;
+    controls.autoRotate = dashboardPrefs.autoRotate;
     world.pointOfView(DEFAULT_POV, 850);
   }
 
