@@ -289,7 +289,6 @@ export function initPanels(options) {
 
     if (btnResetRegion) {
       btnResetRegion.hidden = !region;
-      btnResetRegion.parentElement?.classList.toggle('has-reset', Boolean(region));
     }
 
     renderRows();

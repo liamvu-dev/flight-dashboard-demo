@@ -56,9 +56,9 @@ for (const r of regionKeys) {
   for (let i = 0; i < 12; i++) record(genBooking(r), true);
 }
 
-function resizeVisuals({ includeCharts = true } = {}) {
-  globeApi?.resize();
-  if (includeCharts) chartsApi?.resize();
+function resizeVisuals() {
+  globeApi.resize();
+  chartsApi.resize();
 }
 
 function selectRegion(region) {
@@ -78,7 +78,6 @@ function selectRegion(region) {
 initToolbar({
   dashboardPrefs,
   saveDashboardPrefs,
-  resizeVisuals,
   getControls: () => globeApi?.controls,
   getSelectedRegion: () => selectedRegion,
   onLayoutChange: () => {
@@ -119,8 +118,21 @@ panelsApi = initPanels({
   onSelectRegion: selectRegion,
 });
 
-resizeVisuals({ includeCharts: true });
-addEventListener('resize', () => resizeVisuals({ includeCharts: true }));
+resizeVisuals();
+if (typeof ResizeObserver === 'function') {
+  const visualResizeObserver = new ResizeObserver(resizeVisuals);
+  for (const el of document.querySelectorAll('#globe, #donut, #bars')) {
+    visualResizeObserver.observe(el);
+  }
+} else {
+  addEventListener('resize', resizeVisuals);
+  // Presets and visibility can change the available space without a window resize.
+  const layoutObserver = new MutationObserver(resizeVisuals);
+  layoutObserver.observe(document.querySelector('#app'), {
+    attributes: true,
+    attributeFilter: ['class', 'data-layout'],
+  });
+}
 
 // ===================== Live stream =====================
 function loop() {

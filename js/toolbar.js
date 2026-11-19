@@ -3,16 +3,10 @@ import { VALID_LAYOUTS } from './storage.js';
 const $ = (s) => document.querySelector(s);
 const pad = (n) => String(n).padStart(2, '0');
 const WEEK = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
-const LAYOUT_TRANSITION_PROPS = new Set([
-  'width', 'height', 'margin-left', 'margin-right', 'margin-top', 'margin-bottom',
-  'padding-top', 'padding-bottom', 'padding-left', 'padding-right', 'left', 'right', 'top', 'bottom',
-]);
-
 export function initToolbar(options) {
   const {
     dashboardPrefs,
     saveDashboardPrefs,
-    resizeVisuals,
     getControls,
     getSelectedRegion,
     onLayoutChange,
@@ -25,7 +19,6 @@ export function initToolbar(options) {
   const kpisEl = $('#kpis');
   const colLeftEl = $('#col-left');
   const colRightEl = $('#col-right');
-  const globeEl = $('#globe');
   const layoutBtns = Array.from(document.querySelectorAll('#control-toolbar [data-layout]'));
   const btnToggleLeft = $('#btn-toggle-left');
   const btnToggleKpis = $('#btn-toggle-kpis');
@@ -37,19 +30,6 @@ export function initToolbar(options) {
   const btnFullscreen = $('#btn-fullscreen');
   const clockTimeEl = $('#clock-time');
   const clockDateEl = $('#clock-date');
-
-  let transitionRafId = 0;
-  let transitionTimeoutId = 0;
-  let transitionCleanup = null;
-
-  // ===================== Auto scale 1920x1080 =====================
-  function fit() {
-    if (!appEl) return;
-    const s = Math.min(innerWidth / 1920, innerHeight / 1080);
-    appEl.style.transform = `translate(-50%, -50%) scale(${s})`;
-  }
-  addEventListener('resize', fit);
-  fit();
 
   // ===================== Fullscreen =====================
   const getFullscreenElement = () => document.fullscreenElement || document.webkitFullscreenElement || null;
@@ -73,8 +53,8 @@ export function initToolbar(options) {
   }
 
   if (btnFullscreen) btnFullscreen.addEventListener('click', toggleFullscreen);
-  document.addEventListener('fullscreenchange', () => { syncFullscreenState(); fit(); });
-  document.addEventListener('webkitfullscreenchange', () => { syncFullscreenState(); fit(); });
+  document.addEventListener('fullscreenchange', syncFullscreenState);
+  document.addEventListener('webkitfullscreenchange', syncFullscreenState);
   syncFullscreenState();
 
   // ===================== Clock =====================
@@ -165,127 +145,19 @@ export function initToolbar(options) {
     }
   }
 
-  function applyPanelVisibility({ immediate = false } = {}) {
-    if (!appEl) return;
-    const prefersReducedMotion = Boolean(window.matchMedia?.('(prefers-reduced-motion: reduce)').matches);
-
-    if (transitionCleanup) {
-      transitionCleanup();
-      transitionCleanup = null;
-    }
-    if (transitionRafId) {
-      cancelAnimationFrame(transitionRafId);
-      transitionRafId = 0;
-    }
-    if (transitionTimeoutId) {
-      clearTimeout(transitionTimeoutId);
-      transitionTimeoutId = 0;
-    }
-
-    if (immediate) {
-      appEl.classList.add('no-transitions');
-      syncPanelVisibilityUi();
-      void appEl.offsetWidth;
-      requestAnimationFrame(() => {
-        requestAnimationFrame(() => appEl.classList.remove('no-transitions'));
-      });
-      return;
-    }
-
-    if (prefersReducedMotion) {
-      syncPanelVisibilityUi();
-      appEl.classList.remove('is-transitioning');
-      resizeVisuals?.({ includeCharts: true });
-      return;
-    }
-
-    appEl.classList.add('is-transitioning');
-    syncPanelVisibilityUi();
-
-    const transitionTargets = [
-      appEl,
-      headerEl,
-      kpisEl,
-      colLeftEl,
-      colRightEl,
-      globeEl,
-    ].filter(Boolean);
-
-    const hasRunningLayoutTransitions = () => transitionTargets.some((el) => {
-      if (typeof el.getAnimations !== 'function') return false;
-      return el.getAnimations().some((anim) => (
-        anim.playState === 'running'
-        && typeof anim.transitionProperty === 'string'
-        && LAYOUT_TRANSITION_PROPS.has(anim.transitionProperty)
-      ));
-    });
-
-    const startTime = performance.now();
-    let finished = false;
-    const finishTransition = () => {
-      if (finished) return;
-      finished = true;
-      if (transitionCleanup) {
-        transitionCleanup();
-        transitionCleanup = null;
-      }
-      if (transitionRafId) {
-        cancelAnimationFrame(transitionRafId);
-        transitionRafId = 0;
-      }
-      if (transitionTimeoutId) {
-        clearTimeout(transitionTimeoutId);
-        transitionTimeoutId = 0;
-      }
-      appEl.classList.remove('is-transitioning');
-      resizeVisuals?.({ includeCharts: true });
-    };
-
-    const onTransitionEnd = (e) => {
-      if (!transitionTargets.includes(e.target)) return;
-      if (!LAYOUT_TRANSITION_PROPS.has(e.propertyName)) return;
-      if (!hasRunningLayoutTransitions()) finishTransition();
-    };
-    appEl.addEventListener('transitionend', onTransitionEnd);
-    transitionCleanup = () => appEl.removeEventListener('transitionend', onTransitionEnd);
-
-    const trackTransitionResize = (now) => {
-      resizeVisuals?.({ includeCharts: false });
-      if (!finished && now - startTime < 8000) {
-        transitionRafId = requestAnimationFrame(trackTransitionResize);
-      } else {
-        transitionRafId = 0;
-      }
-    };
-    transitionRafId = requestAnimationFrame(trackTransitionResize);
-
-    const checkTransitionSettlement = () => {
-      if (finished) return;
-      const elapsed = performance.now() - startTime;
-      if (!hasRunningLayoutTransitions() || elapsed >= 8000) {
-        finishTransition();
-      } else {
-        transitionTimeoutId = setTimeout(checkTransitionSettlement, 150);
-      }
-    };
-    transitionTimeoutId = setTimeout(checkTransitionSettlement, 420);
-  }
-
   function setLayout(layout) {
     if (!VALID_LAYOUTS.has(layout) || dashboardPrefs.layout === layout) return;
     dashboardPrefs.layout = layout;
     saveDashboardPrefs(dashboardPrefs);
-    applyPanelVisibility();
+    syncPanelVisibilityUi();
     onLayoutChange?.(layout);
-    requestAnimationFrame(() => resizeVisuals?.({ includeCharts: true }));
   }
 
   function togglePanel(key) {
     if (!['showLeft', 'showKpis', 'showRight'].includes(key)) return;
     dashboardPrefs[key] = !dashboardPrefs[key];
     saveDashboardPrefs(dashboardPrefs);
-    applyPanelVisibility();
-    requestAnimationFrame(() => resizeVisuals?.({ includeCharts: true }));
+    syncPanelVisibilityUi();
   }
 
   function setZenMode(enabled) {
@@ -293,7 +165,7 @@ export function initToolbar(options) {
     if (dashboardPrefs.zen === next) return;
     dashboardPrefs.zen = next;
     saveDashboardPrefs(dashboardPrefs);
-    applyPanelVisibility();
+    syncPanelVisibilityUi();
   }
 
   function toggleZenMode() {
@@ -367,11 +239,9 @@ export function initToolbar(options) {
     }
   });
 
-  applyPanelVisibility({ immediate: true });
+  syncPanelVisibilityUi();
 
   return {
-    fit,
-    applyPanelVisibility,
     syncPanelVisibilityUi,
     setLayout,
     togglePanel,

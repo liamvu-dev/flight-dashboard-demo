@@ -64,23 +64,16 @@ export function initGlobe(options) {
     .ringPropagationSpeed(2.6)
     .ringRepeatPeriod(650);
 
-  let lastGlobeW = globeEl.clientWidth;
-  let lastGlobeH = globeEl.clientHeight;
+  const camera = world.camera();
+  const halfFov = Math.tan(camera.fov * DEG2RAD / 2);
 
   function resize() {
-    if (!world || !globeEl) return;
-    const w = globeEl.clientWidth;
-    const h = globeEl.clientHeight;
-    if (w > 0 && h > 0 && (w !== lastGlobeW || h !== lastGlobeH)) {
-      lastGlobeW = w;
-      lastGlobeH = h;
-      world.width(w).height(h);
-    }
-  }
-
-  if (typeof ResizeObserver === 'function' && globeEl) {
-    const globeResizeObserver = new ResizeObserver(() => resize());
-    globeResizeObserver.observe(globeEl);
+    const { clientWidth: width, clientHeight: height } = globeEl;
+    if (!width || !height) return;
+    world.width(width).height(height);
+    // Keep the globe in frame on tall canvases without moving the camera.
+    camera.fov = 2 * Math.atan(halfFov / Math.min(1, width / height)) * RAD2DEG;
+    camera.updateProjectionMatrix();
   }
 
   // Sync bottom legend pill with REGIONS colors + neon glow

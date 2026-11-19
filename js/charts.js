@@ -17,9 +17,14 @@ export function initCharts(options) {
   const legendLeftEl = $('#legend-left');
   const legendRightEl = $('#legend-right');
 
-  const hasEcharts = typeof echarts !== 'undefined';
-  const donut = hasEcharts && donutEl ? echarts.init(donutEl) : null;
-  const bars = hasEcharts && barsEl ? echarts.init(barsEl) : null;
+  const [donut, bars] = [donutEl, barsEl].map((el) => {
+    if (typeof echarts === 'undefined' || !el) return null;
+    // A saved preset can hide either panel at startup.
+    return echarts.init(el, null, {
+      width: el.clientWidth || 1,
+      height: el.clientHeight || 1,
+    });
+  });
 
   // ===================== Donut: Global Route Distribution =====================
   function renderDonut() {
@@ -127,25 +132,17 @@ export function initCharts(options) {
   }
 
   function resize() {
-    const dEl = donut?.getDom?.();
-    if (donut && (!dEl || (dEl.clientWidth > 0 && dEl.clientHeight > 0))) {
-      donut.resize();
-    }
-    const bEl = bars?.getDom?.();
-    if (bars && (!bEl || (bEl.clientWidth > 0 && bEl.clientHeight > 0))) {
-      bars.resize();
+    for (const chart of [donut, bars]) {
+      if (!chart) continue;
+      const { clientWidth: width, clientHeight: height } = chart.getDom();
+      if (width && height && (width !== chart.getWidth() || height !== chart.getHeight())) {
+        chart.resize({ width, height });
+      }
     }
   }
 
   renderDonut();
   renderBars();
-  resize();
-
-  if (typeof ResizeObserver === 'function') {
-    const chartResizeObserver = new ResizeObserver(() => requestAnimationFrame(resize));
-    if (donutEl) chartResizeObserver.observe(donutEl);
-    if (barsEl) chartResizeObserver.observe(barsEl);
-  }
 
   return {
     donut,
