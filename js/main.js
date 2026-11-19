@@ -48,70 +48,377 @@ syncFullscreenState();
 
 addEventListener('keydown', (e) => {
   if (e.ctrlKey || e.metaKey || e.altKey) return;
-  if (e.target && ['INPUT', 'TEXTAREA', 'SELECT'].includes(e.target.tagName)) return;
+  if (e.target && (['INPUT', 'TEXTAREA', 'SELECT'].includes(e.target.tagName) || e.target.isContentEditable)) return;
   const key = e.key.toLowerCase();
   if (key === 'f') {
     e.preventDefault();
     toggleFullscreen();
   } else if (key === '1') {
     e.preventDefault();
-    dashboardControls?.setLayout('classic');
+    setLayout('classic');
   } else if (key === '2') {
     e.preventDefault();
-    dashboardControls?.setLayout('split');
+    setLayout('split');
   } else if (key === '3') {
     e.preventDefault();
-    dashboardControls?.setLayout('dock');
+    setLayout('dock');
   } else if (key === 'z') {
     e.preventDefault();
-    dashboardControls?.toggleZen();
+    toggleZenMode();
   } else if (key === 'r') {
     e.preventDefault();
-    dashboardControls?.toggleAutoRotate();
+    toggleAutoRotate();
   } else if (key === '0') {
     e.preventDefault();
-    dashboardControls?.resetGlobeView();
+    resetGlobeView();
+  } else if (key === 'escape' && dashboardPrefs.zen) {
+    e.preventDefault();
+    setZenMode(false);
+  } else if (key === 'escape' && selectedRegion && !getFullscreenElement()) {
+    selectRegion(null);
   }
 });
 
-// ===================== Dashboard Prefs (early apply before Globe init) =====================
+// ===================== Dashboard Layout, Panel Visibility & Zen Mode =====================
 const PREFS_KEY = 'onefly_dashboard_prefs_v1';
 const VALID_LAYOUTS = new Set(['classic', 'split', 'dock']);
-const DEFAULT_GLOBE_POV = { lat: 20, lng: 30, altitude: 1.46 };
+const DEFAULT_DASHBOARD_PREFS = {
+  layout: 'classic',
+  showLeft: true,
+  showKpis: true,
+  showRight: true,
+  zen: false,
+  autoRotate: true,
+};
+
 const appEl = $('#app');
+const headerEl = $('.header');
+const kpisEl = $('#kpis');
+const colLeftEl = $('#col-left');
+const colRightEl = $('#col-right');
+const layoutBtns = Array.from(document.querySelectorAll('#control-toolbar [data-layout]'));
+const btnToggleLeft = $('#btn-toggle-left');
+const btnToggleKpis = $('#btn-toggle-kpis');
+const btnToggleRight = $('#btn-toggle-right');
+const btnToggleZen = $('#btn-toggle-zen');
+const btnZenRestore = $('#btn-zen-restore');
+const btnGlobeRotate = $('#btn-globe-rotate');
+const btnGlobeReset = $('#btn-globe-reset');
 
 function loadDashboardPrefs() {
-  const defaults = { layout: 'classic', showLeft: true, showKpis: true, showRight: true, autoRotate: true };
   try {
     const raw = localStorage.getItem(PREFS_KEY);
-    if (!raw) return defaults;
+    if (!raw) return { ...DEFAULT_DASHBOARD_PREFS };
     const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object') return { ...DEFAULT_DASHBOARD_PREFS };
     return {
-      layout: VALID_LAYOUTS.has(parsed.layout) ? parsed.layout : defaults.layout,
-      showLeft: typeof parsed.showLeft === 'boolean' ? parsed.showLeft : defaults.showLeft,
-      showKpis: typeof parsed.showKpis === 'boolean' ? parsed.showKpis : defaults.showKpis,
-      showRight: typeof parsed.showRight === 'boolean' ? parsed.showRight : defaults.showRight,
-      autoRotate: typeof parsed.autoRotate === 'boolean' ? parsed.autoRotate : defaults.autoRotate,
+      layout: VALID_LAYOUTS.has(parsed.layout) ? parsed.layout : DEFAULT_DASHBOARD_PREFS.layout,
+      showLeft: typeof parsed.showLeft === 'boolean' ? parsed.showLeft : DEFAULT_DASHBOARD_PREFS.showLeft,
+      showKpis: typeof parsed.showKpis === 'boolean' ? parsed.showKpis : DEFAULT_DASHBOARD_PREFS.showKpis,
+      showRight: typeof parsed.showRight === 'boolean' ? parsed.showRight : DEFAULT_DASHBOARD_PREFS.showRight,
+      zen: typeof parsed.zen === 'boolean' ? parsed.zen : DEFAULT_DASHBOARD_PREFS.zen,
+      autoRotate: typeof parsed.autoRotate === 'boolean' ? parsed.autoRotate : DEFAULT_DASHBOARD_PREFS.autoRotate,
     };
   } catch {
-    return defaults;
+    return { ...DEFAULT_DASHBOARD_PREFS };
+  }
+}
+
+function saveDashboardPrefs() {
+  try {
+    localStorage.setItem(PREFS_KEY, JSON.stringify({
+      layout: dashboardPrefs.layout,
+      showLeft: Boolean(dashboardPrefs.showLeft),
+      showKpis: Boolean(dashboardPrefs.showKpis),
+      showRight: Boolean(dashboardPrefs.showRight),
+      zen: Boolean(dashboardPrefs.zen),
+      autoRotate: Boolean(dashboardPrefs.autoRotate),
+    }));
+  } catch {
+    // Ignore storage errors in restricted environments
   }
 }
 
 const dashboardPrefs = loadDashboardPrefs();
-let dashboardControls = null;
+let globeEl = null;
+let world = null;
+let controls = null;
+let donut = null;
+let bars = null;
+let selectedRegion = null;
+let lastGlobeW = 0;
+let lastGlobeH = 0;
+let transitionRafId = 0;
+let transitionTimeoutId = 0;
+let transitionCleanup = null;
+const LAYOUT_TRANSITION_PROPS = new Set(['width', 'height', 'margin-left', 'margin-right', 'margin-top', 'margin-bottom', 'padding-top', 'padding-bottom', 'padding-left', 'padding-right', 'left', 'right', 'top', 'bottom']);
 
-function applyLayoutAttributes() {
-  if (!appEl) return;
-  const isZen = !dashboardPrefs.showLeft && !dashboardPrefs.showKpis && !dashboardPrefs.showRight;
-  appEl.dataset.layout = dashboardPrefs.layout;
-  appEl.dataset.hideLeft = String(!dashboardPrefs.showLeft);
-  appEl.dataset.hideKpis = String(!dashboardPrefs.showKpis);
-  appEl.dataset.hideRight = String(!dashboardPrefs.showRight);
-  appEl.dataset.zen = String(isZen);
-  appEl.dataset.globePaused = String(!dashboardPrefs.autoRotate);
+function resizeVisuals({ includeCharts = true } = {}) {
+  if (world && globeEl) {
+    const w = globeEl.clientWidth;
+    const h = globeEl.clientHeight;
+    if (w > 0 && h > 0 && (w !== lastGlobeW || h !== lastGlobeH)) {
+      lastGlobeW = w;
+      lastGlobeH = h;
+      world.width(w).height(h);
+    }
+  }
+  if (includeCharts) {
+    if (donut) donut.resize();
+    if (bars) bars.resize();
+  }
 }
-applyLayoutAttributes();
+
+function setRegionHidden(el, hidden) {
+  if (!el) return;
+  if (hidden && document.activeElement && el.contains(document.activeElement)) {
+    document.activeElement.blur();
+  }
+  el.setAttribute('aria-hidden', String(hidden));
+  el.inert = hidden;
+}
+
+function syncPanelToggleBtn(btn, visible, showLabel, hideLabel) {
+  if (!btn) return;
+  btn.classList.toggle('active', visible);
+  btn.setAttribute('aria-pressed', String(visible));
+  const label = visible ? hideLabel : showLabel;
+  btn.setAttribute('data-tooltip', label);
+  btn.setAttribute('aria-label', label);
+}
+
+function syncPanelVisibilityUi() {
+  if (!appEl) return;
+  const { layout, showLeft, showRight, showKpis, zen, autoRotate } = dashboardPrefs;
+
+  appEl.dataset.layout = layout;
+  appEl.dataset.globePaused = String(!autoRotate);
+  appEl.classList.toggle('hide-left', !showLeft);
+  appEl.classList.toggle('hide-right', !showRight);
+  appEl.classList.toggle('hide-kpis', !showKpis);
+  appEl.classList.toggle('zen-mode', zen);
+
+  for (const btn of layoutBtns) {
+    const active = btn.dataset.layout === layout;
+    btn.classList.toggle('active', active);
+    btn.setAttribute('aria-pressed', String(active));
+  }
+
+  syncPanelToggleBtn(btnToggleLeft, showLeft, 'Show Left Panels', 'Hide Left Panels');
+  syncPanelToggleBtn(btnToggleKpis, showKpis, 'Show KPI Bar', 'Hide KPI Bar');
+  syncPanelToggleBtn(btnToggleRight, showRight, 'Show Right Panels', 'Hide Right Panels');
+
+  if (btnToggleZen) {
+    btnToggleZen.classList.toggle('active', zen);
+    btnToggleZen.setAttribute('aria-pressed', String(zen));
+    btnToggleZen.setAttribute('data-tooltip', zen ? 'Exit Zen Mode (Z / Esc)' : 'Zen Globe Mode (Z)');
+    btnToggleZen.setAttribute('aria-label', zen ? 'Exit Zen / Globe Focus Mode' : 'Enter Zen / Globe Focus Mode');
+  }
+
+  if (btnGlobeRotate) {
+    btnGlobeRotate.classList.toggle('active', autoRotate);
+    btnGlobeRotate.setAttribute('aria-pressed', String(autoRotate));
+    btnGlobeRotate.setAttribute('data-tooltip', autoRotate ? 'Pause Globe Rotation (R)' : 'Resume Globe Rotation (R)');
+    btnGlobeRotate.setAttribute('aria-label', autoRotate ? 'Pause Globe Rotation' : 'Resume Globe Rotation');
+  }
+
+  if (controls && !selectedRegion) {
+    controls.autoRotate = autoRotate;
+  }
+
+  setRegionHidden(headerEl, zen);
+  setRegionHidden(kpisEl, zen || !showKpis);
+  setRegionHidden(colLeftEl, zen || !showLeft);
+  setRegionHidden(colRightEl, zen || !showRight);
+
+  if (btnZenRestore) {
+    if (!zen && document.activeElement === btnZenRestore) {
+      btnZenRestore.blur();
+    }
+    btnZenRestore.setAttribute('aria-hidden', String(!zen));
+    btnZenRestore.tabIndex = zen ? 0 : -1;
+    btnZenRestore.inert = !zen;
+  }
+}
+
+function applyPanelVisibility({ immediate = false } = {}) {
+  if (!appEl) return;
+  const prefersReducedMotion = Boolean(window.matchMedia?.('(prefers-reduced-motion: reduce)').matches);
+
+  if (transitionCleanup) {
+    transitionCleanup();
+    transitionCleanup = null;
+  }
+  if (transitionRafId) {
+    cancelAnimationFrame(transitionRafId);
+    transitionRafId = 0;
+  }
+  if (transitionTimeoutId) {
+    clearTimeout(transitionTimeoutId);
+    transitionTimeoutId = 0;
+  }
+
+  if (immediate) {
+    appEl.classList.add('no-transitions');
+    syncPanelVisibilityUi();
+    void appEl.offsetWidth;
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => appEl.classList.remove('no-transitions'));
+    });
+    return;
+  }
+
+  if (prefersReducedMotion) {
+    syncPanelVisibilityUi();
+    appEl.classList.remove('is-transitioning');
+    resizeVisuals({ includeCharts: true });
+    return;
+  }
+
+  appEl.classList.add('is-transitioning');
+  syncPanelVisibilityUi();
+
+  const transitionTargets = [
+    appEl,
+    headerEl,
+    kpisEl,
+    colLeftEl,
+    colRightEl,
+    globeEl,
+  ].filter(Boolean);
+
+  const hasRunningLayoutTransitions = () => transitionTargets.some((el) => {
+    if (typeof el.getAnimations !== 'function') return false;
+    return el.getAnimations().some((anim) => (
+      anim.playState === 'running'
+      && typeof anim.transitionProperty === 'string'
+      && LAYOUT_TRANSITION_PROPS.has(anim.transitionProperty)
+    ));
+  });
+
+  const startTime = performance.now();
+  let finished = false;
+  const finishTransition = () => {
+    if (finished) return;
+    finished = true;
+    if (transitionCleanup) {
+      transitionCleanup();
+      transitionCleanup = null;
+    }
+    if (transitionRafId) {
+      cancelAnimationFrame(transitionRafId);
+      transitionRafId = 0;
+    }
+    if (transitionTimeoutId) {
+      clearTimeout(transitionTimeoutId);
+      transitionTimeoutId = 0;
+    }
+    appEl.classList.remove('is-transitioning');
+    resizeVisuals({ includeCharts: true });
+  };
+
+  const onTransitionEnd = (e) => {
+    if (!transitionTargets.includes(e.target)) return;
+    if (!LAYOUT_TRANSITION_PROPS.has(e.propertyName)) return;
+    if (!hasRunningLayoutTransitions()) finishTransition();
+  };
+  appEl.addEventListener('transitionend', onTransitionEnd);
+  transitionCleanup = () => appEl.removeEventListener('transitionend', onTransitionEnd);
+
+  const trackTransitionResize = (now) => {
+    resizeVisuals({ includeCharts: false });
+    if (!finished && now - startTime < 8000) {
+      transitionRafId = requestAnimationFrame(trackTransitionResize);
+    } else {
+      transitionRafId = 0;
+    }
+  };
+  transitionRafId = requestAnimationFrame(trackTransitionResize);
+
+  const checkTransitionSettlement = () => {
+    if (finished) return;
+    const elapsed = performance.now() - startTime;
+    if (!hasRunningLayoutTransitions() || elapsed >= 8000) {
+      finishTransition();
+    } else {
+      transitionTimeoutId = setTimeout(checkTransitionSettlement, 150);
+    }
+  };
+  transitionTimeoutId = setTimeout(checkTransitionSettlement, 420);
+}
+
+function setLayout(layout) {
+  if (!VALID_LAYOUTS.has(layout) || dashboardPrefs.layout === layout) return;
+  dashboardPrefs.layout = layout;
+  saveDashboardPrefs();
+  applyPanelVisibility();
+  requestAnimationFrame(() => resizeVisuals({ includeCharts: true }));
+}
+
+function togglePanel(key) {
+  if (!['showLeft', 'showKpis', 'showRight'].includes(key)) return;
+  dashboardPrefs[key] = !dashboardPrefs[key];
+  saveDashboardPrefs();
+  applyPanelVisibility();
+  requestAnimationFrame(() => resizeVisuals({ includeCharts: true }));
+}
+
+function setZenMode(enabled) {
+  const next = Boolean(enabled);
+  if (dashboardPrefs.zen === next) return;
+  dashboardPrefs.zen = next;
+  saveDashboardPrefs();
+  applyPanelVisibility();
+}
+
+function toggleZenMode() {
+  setZenMode(!dashboardPrefs.zen);
+}
+
+function toggleAutoRotate() {
+  dashboardPrefs.autoRotate = !dashboardPrefs.autoRotate;
+  saveDashboardPrefs();
+  if (controls) {
+    controls.autoRotate = dashboardPrefs.autoRotate;
+  }
+  syncPanelVisibilityUi();
+}
+
+function resetGlobeView() {
+  if (controls) {
+    if (controls.target && typeof controls.target.set === 'function') {
+      controls.target.set(0, 0, 0);
+    }
+    if (typeof controls.update === 'function') {
+      controls.update();
+    }
+  }
+  if (world) {
+    world.pointOfView(DEFAULT_POV, 900);
+  }
+  if (btnGlobeReset) {
+    btnGlobeReset.classList.add('active');
+    setTimeout(() => btnGlobeReset.classList.remove('active'), 320);
+  }
+}
+
+for (const btn of layoutBtns) {
+  btn.addEventListener('click', () => setLayout(btn.dataset.layout));
+}
+if (btnToggleLeft) btnToggleLeft.addEventListener('click', () => togglePanel('showLeft'));
+if (btnToggleKpis) btnToggleKpis.addEventListener('click', () => togglePanel('showKpis'));
+if (btnToggleRight) btnToggleRight.addEventListener('click', () => togglePanel('showRight'));
+if (btnToggleZen) btnToggleZen.addEventListener('click', toggleZenMode);
+if (btnZenRestore) {
+  btnZenRestore.addEventListener('click', () => {
+    setZenMode(false);
+    if (btnToggleZen) btnToggleZen.focus({ preventScroll: true });
+  });
+}
+if (btnGlobeRotate) btnGlobeRotate.addEventListener('click', toggleAutoRotate);
+if (btnGlobeReset) btnGlobeReset.addEventListener('click', resetGlobeView);
+
+applyPanelVisibility({ immediate: true });
 
 // ===================== Clock =====================
 const WEEK = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
@@ -146,9 +453,19 @@ const regionCounts = Object.fromEntries(regionKeys.map((r) => [r, REGIONS[r].wei
 const airlineCounts = Object.fromEntries(AIRLINES.map((a, i) => [a.code, Math.round(17000 - i * 1200 + rand(-400, 400))]));
 const routeCounts = Object.fromEntries(regionKeys.map((r) => [r, new Map()]));
 const byRegion = Object.fromEntries(regionKeys.map((r) => [r, AIRPORTS.filter((a) => a.region === r)]));
+const REGION_COORDS = {
+  Asia:     { lat: 24,  lng: 104, altitude: 1.46 },
+  Europe:   { lat: 48,  lng: 12,  altitude: 1.46 },
+  Americas: { lat: 18,  lng: -82, altitude: 1.46 },
+  Mideast:  { lat: 26,  lng: 48,  altitude: 1.46 },
+  Africa:   { lat: 4,   lng: 20,  altitude: 1.46 },
+  Oceania:  { lat: -28, lng: 145, altitude: 1.46 },
+};
+const DEFAULT_POV = { lat: 20, lng: 30, altitude: 1.46 };
+selectedRegion = null;
 
-function genBooking() {
-  const region = weightedPick(regionKeys.map((r) => [r, REGIONS[r].weight]));
+function genBooking(forcedRegion = null) {
+  const region = forcedRegion || weightedPick(regionKeys.map((r) => [r, REGIONS[r].weight]));
   const from = pick(byRegion[region]);
   let to;
   do {
@@ -170,12 +487,15 @@ function record(b, silent) {
 }
 // warm-up data
 for (let i = 0; i < 900; i++) record(genBooking(), true);
+for (const r of regionKeys) {
+  for (let i = 0; i < 12; i++) record(genBooking(r), true);
+}
 
 // ===================== Globe =====================
-const globeEl = $('#globe');
+globeEl = $('#globe');
 const arcs = [];
 const rings = [];
-const world = Globe({ rendererConfig: { preserveDrawingBuffer: true } })(globeEl)
+world = Globe({ rendererConfig: { preserveDrawingBuffer: true } })(globeEl)
   .width(globeEl.clientWidth)
   .height(globeEl.clientHeight)
   .backgroundColor('rgba(0,0,0,0)')
@@ -190,17 +510,48 @@ const world = Globe({ rendererConfig: { preserveDrawingBuffer: true } })(globeEl
   .ringMaxRadius(4.2)
   .ringPropagationSpeed(2.6)
   .ringRepeatPeriod(650);
+lastGlobeW = globeEl.clientWidth;
+lastGlobeH = globeEl.clientHeight;
+if (typeof ResizeObserver === 'function' && globeEl) {
+  const globeResizeObserver = new ResizeObserver(() => resizeVisuals({ includeCharts: false }));
+  globeResizeObserver.observe(globeEl);
+}
 
 // Sync bottom legend pill with REGIONS colors + neon glow
 const captionEl = $('#globe-caption');
+function syncCaptionUI() {
+  if (!captionEl) return;
+  const buttons = captionEl.querySelectorAll('button[data-region]');
+  for (const btn of buttons) {
+    const r = btn.dataset.region || null;
+    const isAllBtn = r === null;
+    const isActive = isAllBtn ? selectedRegion === null : selectedRegion === r;
+    const isDimmed = !isAllBtn && Boolean(selectedRegion) && selectedRegion !== r;
+    btn.classList.toggle('active', isActive);
+    btn.classList.toggle('dimmed', isDimmed);
+    btn.setAttribute('aria-pressed', String(isActive));
+  }
+}
+
 if (captionEl) {
-  captionEl.innerHTML = regionKeys
-    .map((r) => `<span><i style="background:${REGIONS[r].color};box-shadow:0 0 8px ${REGIONS[r].color}"></i>${r}</span>`)
-    .join('');
+  captionEl.innerHTML =
+    `<button type="button" class="caption-item caption-reset" data-region="">All Regions</button>` +
+    regionKeys
+      .map((r) => {
+        const c = REGIONS[r].color;
+        return `<button type="button" class="caption-item" data-region="${r}" style="--region-color:${c};--region-glow:${c}88"><i style="background:${c};box-shadow:0 0 8px ${c}"></i>${r}</button>`;
+      })
+      .join('');
+  captionEl.addEventListener('click', (e) => {
+    const btn = e.target.closest('button[data-region]');
+    if (!btn) return;
+    selectRegion(btn.dataset.region || null);
+  });
+  syncCaptionUI();
 }
 
 // Larger globe view filling the center stage
-world.pointOfView(DEFAULT_GLOBE_POV, 0);
+world.pointOfView(DEFAULT_POV, 0);
 world.renderer().setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
 
 // Enhance 4K satellite relief, anisotropic sharpness & balanced 3D shading
@@ -222,7 +573,7 @@ world.renderer().setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
   mat.shininess = 18;
   mat.needsUpdate = true;
 })();
-const controls = world.controls();
+controls = world.controls();
 controls.autoRotate = dashboardPrefs.autoRotate;
 controls.autoRotateSpeed = -0.55; // rotate east -> west
 controls.enableZoom = false;
@@ -346,7 +697,17 @@ for (const ap of AIRPORTS) {
   const pos = world.getCoords(ap.lat, ap.lng, 0.004);
   m.position.set(pos.x, pos.y, pos.z);
   m.lookAt(pos.x * 2, pos.y * 2, pos.z * 2);
+  m.userData = { airport: ap, region: ap.region };
   beaconsGroup.add(m);
+}
+
+function syncBeaconsUI() {
+  for (const m of beaconsGroup.children) {
+    const isMatch = !selectedRegion || m.userData.region === selectedRegion;
+    m.material.opacity = selectedRegion ? (isMatch ? 1.0 : 0.16) : 0.95;
+    const s = selectedRegion ? (isMatch ? 1.2 : 0.75) : 1.0;
+    m.scale.set(s, s, 1);
+  }
 }
 
 // ===================== 3D Planes & Trailing Arcs =====================
@@ -535,6 +896,12 @@ function createPlane(arc, colorHex, isInitial) {
   const coreMesh = new THREE.Line(lineGeo, coreMat);
   planesGroup.add(coreMesh);
 
+  const isVisible = !selectedRegion || arc.region === selectedRegion;
+  mesh.visible = isVisible;
+  destMesh.visible = isVisible;
+  lineMesh.visible = isVisible;
+  coreMesh.visible = isVisible;
+
   const plane = {
     arc,
     curve,
@@ -589,11 +956,18 @@ function animatePlanes(now) {
 
   for (let i = 0; i < planes.length; i++) {
     const p = planes[i];
+    const isMatch = !selectedRegion || p.arc.region === selectedRegion;
     p.t += p.speed * dt;
     if (p.t > 1) {
       p.t = 0;
-      addRing(p.arc.to); // trigger pulse ring at destination when plane arrives
+      if (isMatch) addRing(p.arc.to, p.arc.region); // trigger pulse ring at destination when plane arrives
     }
+
+    p.mesh.visible = isMatch;
+    p.destMesh.visible = isMatch;
+    p.lineMesh.visible = isMatch;
+    p.coreMesh.visible = isMatch;
+    if (!isMatch) continue;
 
     // 1. Position & orientation of plane
     const t1 = p.t;
@@ -657,22 +1031,50 @@ requestAnimationFrame(animatePlanes);
 function addArc(b, isInitial) {
   const c = REGIONS[b.region].color;
   const arc = {
+    region: b.region,
     from: b.from,
     to: b.to,
     startLat: b.from.lat, startLng: b.from.lng, endLat: b.to.lat, endLng: b.to.lng,
   };
   createPlane(arc, c, isInitial);
   arcs.push(arc);
-  if (arcs.length > 80) removePlane(arcs.shift());
+  if (arcs.length > 80) {
+    let dropIdx = 0;
+    if (selectedRegion) {
+      const nonMatchIdx = arcs.findIndex((a) => a.region !== selectedRegion);
+      if (nonMatchIdx !== -1) dropIdx = nonMatchIdx;
+    }
+    const [removed] = arcs.splice(dropIdx, 1);
+    removePlane(removed);
+  }
 }
-function addRing(ap) {
-  rings.push({ lat: ap.lat, lng: ap.lng, rgb: hexToRgb(REGIONS[ap.region].color) });
-  if (rings.length > 14) rings.shift();
-  world.ringsData([...rings]);
+function ensureRegionArcs(region, minCount = 10) {
+  let count = arcs.reduce((acc, a) => acc + (a.region === region ? 1 : 0), 0);
+  while (count < minCount) {
+    addArc(genBooking(region), true);
+    count++;
+  }
+}
+function syncGlobeRings() {
+  const visibleRings = selectedRegion ? rings.filter((r) => r.region === selectedRegion) : rings;
+  world.ringsData([...visibleRings]);
+}
+function addRing(ap, regionOverride = null) {
+  const reg = regionOverride || ap.region;
+  rings.push({ lat: ap.lat, lng: ap.lng, rgb: hexToRgb(REGIONS[reg].color), region: reg });
+  if (rings.length > 14) {
+    let dropIdx = 0;
+    if (selectedRegion) {
+      const nonMatchIdx = rings.findIndex((r) => r.region !== selectedRegion);
+      if (nonMatchIdx !== -1) dropIdx = nonMatchIdx;
+    }
+    rings.splice(dropIdx, 1);
+  }
+  syncGlobeRings();
 }
 for (let i = 0; i < 65; i++) addArc(genBooking(), true);
 
-addEventListener('resize', () => world.width(globeEl.clientWidth).height(globeEl.clientHeight));
+addEventListener('resize', () => resizeVisuals({ includeCharts: true }));
 
 // ===================== Dashboard Snapshot (PNG) =====================
 const btnSnapshot = $('#btn-snapshot');
@@ -751,32 +1153,78 @@ function captureSnapshot() {
 if (btnSnapshot) btnSnapshot.addEventListener('click', captureSnapshot);
 
 // ===================== Donut: Global Route Distribution =====================
-const donut = echarts.init($('#donut'));
+donut = echarts.init($('#donut'));
 function renderDonut() {
   const total = regionKeys.reduce((s, r) => s + regionCounts[r], 0);
-  const data = regionKeys.map((r) => ({ name: r, value: regionCounts[r], itemStyle: { color: REGIONS[r].color } }));
+  const data = regionKeys.map((r) => {
+    const color = REGIONS[r].color;
+    const isSelected = selectedRegion === r;
+    const isDimmed = Boolean(selectedRegion) && !isSelected;
+    return {
+      name: r,
+      value: regionCounts[r],
+      selected: isSelected,
+      itemStyle: {
+        color,
+        opacity: isDimmed ? 0.25 : 1,
+        borderColor: isSelected ? '#ffffff' : 'transparent',
+        borderWidth: isSelected ? 2 : 0,
+        shadowBlur: isSelected ? 20 : (isDimmed ? 0 : 12),
+        shadowColor: isSelected ? color : 'rgba(31,209,249,.6)',
+      },
+    };
+  });
+  const centerText = selectedRegion
+    ? `${selectedRegion}\n${((regionCounts[selectedRegion] / total) * 100).toFixed(1)}%`
+    : 'Partner\nAirlines';
   donut.setOption({
     title: {
-      text: 'Partner\nAirlines', left: 'center', top: 'center',
-      textStyle: { color: '#e8f8ff', fontFamily: 'Rajdhani', fontWeight: 700, fontSize: 18, lineHeight: 20 },
+      text: centerText, left: 'center', top: 'center',
+      textStyle: {
+        color: selectedRegion ? REGIONS[selectedRegion].color : '#e8f8ff',
+        fontFamily: 'Rajdhani', fontWeight: 700, fontSize: 18, lineHeight: 20,
+      },
     },
     series: [
       { type: 'pie', radius: ['86%', '88%'], silent: true, label: { show: false }, data: [{ value: 1, itemStyle: { color: 'rgba(31,209,249,.35)' } }] },
       {
-        type: 'pie', radius: ['58%', '78%'], padAngle: 2, itemStyle: { borderRadius: 3, shadowBlur: 12, shadowColor: 'rgba(31,209,249,.6)' },
+        type: 'pie', radius: ['58%', '78%'], padAngle: 2,
+        selectedMode: 'single', selectedOffset: 7,
+        itemStyle: { borderRadius: 3, shadowBlur: 12, shadowColor: 'rgba(31,209,249,.6)' },
         label: { show: false }, data, animationDurationUpdate: 800,
       },
       { type: 'pie', radius: ['48%', '50%'], silent: true, label: { show: false }, data: [{ value: 1, itemStyle: { color: 'rgba(31,209,249,.25)' } }] },
     ],
   });
-  const item = (r) => `<div><i style="background:${REGIONS[r].color};color:${REGIONS[r].color}"></i>${r}<b>${((regionCounts[r] / total) * 100).toFixed(1)}%</b></div>`;
+  const item = (r) => {
+    const c = REGIONS[r].color;
+    const isActive = selectedRegion === r;
+    const isDimmed = Boolean(selectedRegion) && !isActive;
+    const cls = ['legend-item', isActive ? 'active' : '', isDimmed ? 'dimmed' : ''].filter(Boolean).join(' ');
+    return `<button type="button" class="${cls}" data-region="${r}" aria-pressed="${isActive}" style="--region-color:${c};--region-glow:${c}88"><i style="background:${c};color:${c}"></i><span>${r}</span><b>${((regionCounts[r] / total) * 100).toFixed(1)}%</b></button>`;
+  };
   $('#legend-left').innerHTML = regionKeys.slice(0, 3).map(item).join('');
   $('#legend-right').innerHTML = regionKeys.slice(3).map(item).join('');
 }
 renderDonut();
 
+donut.on('click', (params) => {
+  if (params.seriesIndex !== 1 || !params.name || !REGIONS[params.name]) return;
+  selectRegion(params.name);
+});
+
+for (const legendEl of [$('#legend-left'), $('#legend-right')]) {
+  if (legendEl) {
+    legendEl.addEventListener('click', (e) => {
+      const btn = e.target.closest('button[data-region]');
+      if (!btn) return;
+      selectRegion(btn.dataset.region);
+    });
+  }
+}
+
 // ===================== Bars: Top 10 Airlines =====================
-const bars = echarts.init($('#bars'));
+bars = echarts.init($('#bars'));
 function renderBars() {
   const top = AIRLINES.map((a) => ({ ...a, v: airlineCounts[a.code] })).sort((a, b) => b.v - a.v).slice(0, 10);
   bars.setOption({
@@ -803,11 +1251,17 @@ function renderBars() {
   });
 }
 renderBars();
+resizeVisuals({ includeCharts: true });
+if (typeof ResizeObserver === 'function') {
+  const chartResizeObserver = new ResizeObserver(() => requestAnimationFrame(() => resizeVisuals({ includeCharts: true })));
+  if ($('#donut')) chartResizeObserver.observe($('#donut'));
+  if ($('#bars')) chartResizeObserver.observe($('#bars'));
+}
 
 // ===================== Top Routes by region (rotating) =====================
 let routeRegionIdx = 0;
 function renderTopRoutes() {
-  const region = regionKeys[routeRegionIdx];
+  const region = selectedRegion || regionKeys[routeRegionIdx];
   $('#routes-title').textContent = `Top Routes – ${region}`;
   const list = [...routeCounts[region].entries()].sort((a, b) => b[1] - a[1]).slice(0, 10);
   const max = list.length ? list[0][1] : 1;
@@ -822,14 +1276,24 @@ function renderTopRoutes() {
 }
 renderTopRoutes();
 setInterval(() => {
+  if (selectedRegion) return;
   const box = $('#top-routes');
   box.classList.add('fade');
   setTimeout(() => {
+    if (selectedRegion) {
+      box.classList.remove('fade');
+      return;
+    }
     routeRegionIdx = (routeRegionIdx + 1) % regionKeys.length;
     renderTopRoutes();
     box.classList.remove('fade');
   }, 400);
 }, 10000);
+
+const btnResetRegion = $('#btn-reset-region');
+if (btnResetRegion) {
+  btnResetRegion.addEventListener('click', () => selectRegion(null));
+}
 
 // ===================== Booking table (auto-scroll, pause/resume & search) =====================
 const tableBodyEl = $('#table-body');
@@ -843,7 +1307,7 @@ const recordsCountEl = $('#records-count');
 
 const ROW_H = 38;
 const MAX_TABLE_ROWS = 18;
-const MAX_BOOKING_HISTORY = 120;
+const MAX_HISTORY = 240;
 const bookingHistory = [];
 
 let isLivePaused = false;
@@ -851,6 +1315,7 @@ let rawSearchQuery = '';
 let searchQuery = '';
 let scrolling = false;
 let scrollTimer = null;
+let rowRenderToken = 0;
 
 function rowHtml(b) {
   return `<span class="r">${b.from.code} – ${b.to.code}</span><span>${fmtDT(b.depTime)}</span><span>${fmtDT(b.orderTime)}</span>`;
@@ -863,6 +1328,35 @@ function createRowEl(b, isNew = false) {
   return div;
 }
 
+function saveBookingHistory(b) {
+  bookingHistory.push(b);
+  if (bookingHistory.length <= MAX_HISTORY) return;
+  const counts = Object.fromEntries(regionKeys.map((r) => [r, 0]));
+  for (const item of bookingHistory) counts[item.region]++;
+  const dropIdx = bookingHistory.findIndex((item) => counts[item.region] > 12);
+  bookingHistory.splice(dropIdx !== -1 ? dropIdx : 0, 1);
+}
+
+// Seed initial booking history with guaranteed coverage across all regions
+(function seedBookingHistory() {
+  const now = Date.now();
+  for (let i = 0; i < 120; i++) {
+    const b = genBooking();
+    b.orderTime = new Date(now - (120 - i) * 3500);
+    bookingHistory.push(b);
+  }
+  for (const r of regionKeys) {
+    let count = bookingHistory.filter((b) => b.region === r).length;
+    while (count < 10) {
+      const b = genBooking(r);
+      b.orderTime = new Date(now - randInt(5, 420) * 1000);
+      bookingHistory.push(b);
+      count++;
+    }
+  }
+  bookingHistory.sort((a, b) => a.orderTime - b.orderTime);
+})();
+
 function normalizeRouteQuery(s) {
   return String(s || '').trim().toLowerCase().replace(/[–—-]+/g, ' ').replace(/\s+/g, ' ');
 }
@@ -874,6 +1368,7 @@ function matchesRouteFilter(b, normalizedQuery) {
 }
 
 function cancelRowScrollAnimation() {
+  rowRenderToken++;
   if (scrollTimer) {
     clearTimeout(scrollTimer);
     scrollTimer = null;
@@ -899,10 +1394,14 @@ function renderRows(highlightBooking = null) {
   syncTableModeClasses();
   rowsEl.innerHTML = '';
 
+  const regionFiltered = selectedRegion
+    ? bookingHistory.filter((b) => b.region === selectedRegion)
+    : bookingHistory;
+
   if (searchQuery) {
     const matches = [];
-    for (let i = bookingHistory.length - 1; i >= 0; i--) {
-      const b = bookingHistory[i];
+    for (let i = regionFiltered.length - 1; i >= 0; i--) {
+      const b = regionFiltered[i];
       if (matchesRouteFilter(b, searchQuery)) matches.push(b);
     }
     if (recordsCountEl) {
@@ -911,7 +1410,9 @@ function renderRows(highlightBooking = null) {
     if (matches.length === 0) {
       const empty = document.createElement('div');
       empty.className = 'table-empty';
-      empty.textContent = `No matching routes for "${rawSearchQuery.trim()}"`;
+      empty.textContent = selectedRegion
+        ? `No matching routes for "${rawSearchQuery.trim()}" in ${selectedRegion}`
+        : `No matching routes for "${rawSearchQuery.trim()}"`;
       rowsEl.appendChild(empty);
       return;
     }
@@ -922,7 +1423,7 @@ function renderRows(highlightBooking = null) {
   }
 
   if (recordsCountEl) recordsCountEl.textContent = '';
-  const recent = bookingHistory.slice(-MAX_TABLE_ROWS);
+  const recent = regionFiltered.slice(-MAX_TABLE_ROWS);
   const frag = document.createDocumentFragment();
   for (const b of recent) frag.appendChild(createRowEl(b, false));
   rowsEl.appendChild(frag);
@@ -970,17 +1471,12 @@ if (btnClearSearch && routeSearchEl) {
   });
 }
 
-for (let i = 0; i < 60; i++) {
-  const b = genBooking();
-  b.orderTime = new Date(Date.now() - (60 - i) * 4000);
-  bookingHistory.push(b);
-}
 renderRows();
 
 function pushRow(b) {
   if (isLivePaused) return;
-  bookingHistory.push(b);
-  if (bookingHistory.length > MAX_BOOKING_HISTORY) bookingHistory.shift();
+  saveBookingHistory(b);
+  if (selectedRegion && b.region !== selectedRegion) return;
 
   if (searchQuery) {
     if (matchesRouteFilter(b, searchQuery)) renderRows(b);
@@ -990,15 +1486,50 @@ function pushRow(b) {
   rowsEl.appendChild(createRowEl(b, true));
   if (scrolling) return;
   scrolling = true;
+  const token = rowRenderToken;
   rowsEl.classList.add('anim');
   rowsEl.style.transform = `translateY(-${ROW_H}px)`;
   scrollTimer = setTimeout(() => {
     scrollTimer = null;
+    if (token !== rowRenderToken) return;
     rowsEl.classList.remove('anim');
     while (rowsEl.children.length > MAX_TABLE_ROWS) rowsEl.firstElementChild.remove();
     rowsEl.style.transform = 'translateY(0)';
     scrolling = false;
   }, 650);
+}
+
+function selectRegion(region) {
+  const next = region && REGIONS[region]
+    ? (selectedRegion === region ? null : region)
+    : null;
+  if (next === selectedRegion) return;
+  selectedRegion = next;
+
+  if (selectedRegion) {
+    ensureRegionArcs(selectedRegion, 10);
+    controls.autoRotate = false;
+    world.pointOfView(REGION_COORDS[selectedRegion], 850);
+  } else {
+    controls.autoRotate = dashboardPrefs.autoRotate;
+    world.pointOfView(DEFAULT_POV, 850);
+  }
+
+  syncCaptionUI();
+  syncBeaconsUI();
+  syncGlobeRings();
+  renderDonut();
+
+  const routesBox = $('#top-routes');
+  if (routesBox) routesBox.classList.remove('fade');
+  renderTopRoutes();
+
+  if (btnResetRegion) {
+    btnResetRegion.hidden = !selectedRegion;
+    btnResetRegion.parentElement?.classList.toggle('has-reset', Boolean(selectedRegion));
+  }
+
+  renderRows();
 }
 
 // ===================== Live stream =====================
@@ -1007,7 +1538,7 @@ function loop() {
   record(b, false);
   pushRow(b);
   addArc(b);
-  addRing(b.to);
+  addRing(b.to, b.region);
   setTimeout(loop, rand(900, 1800));
 }
 setTimeout(loop, 1200);
@@ -1017,178 +1548,3 @@ setInterval(() => { kpi.sales.value += randInt(5, 60); }, 700);
 setInterval(() => { renderDonut(); renderBars(); }, 3000);
 setInterval(() => { if (Math.random() < 0.3) kpi.routes.value += 1; }, 5000);
 setInterval(() => { renderTopRoutes(); }, 4000);
-
-// ===================== Header Control Toolbar =====================
-(function initDashboardToolbar() {
-  const layoutBtns = Array.from(document.querySelectorAll('#control-toolbar [data-layout]'));
-  const btnToggleLeft = $('#btn-toggle-left');
-  const btnToggleKpis = $('#btn-toggle-kpis');
-  const btnToggleRight = $('#btn-toggle-right');
-  const btnToggleZen = $('#btn-toggle-zen');
-  const btnGlobeRotate = $('#btn-globe-rotate');
-  const btnGlobeReset = $('#btn-globe-reset');
-  const donutEl = $('#donut');
-  const barsEl = $('#bars');
-
-  let preZenState = null;
-  let resizeSyncTimer = null;
-
-  function savePrefs() {
-    try {
-      localStorage.setItem(PREFS_KEY, JSON.stringify(dashboardPrefs));
-    } catch {
-      // ignore storage errors in restricted environments
-    }
-  }
-
-  function syncVisualSizes() {
-    if (globeEl && globeEl.clientWidth > 0 && globeEl.clientHeight > 0) {
-      world.width(globeEl.clientWidth).height(globeEl.clientHeight);
-    }
-    if (donutEl && donutEl.clientWidth > 0 && donutEl.clientHeight > 0) {
-      donut.resize();
-    }
-    if (barsEl && barsEl.clientWidth > 0 && barsEl.clientHeight > 0) {
-      bars.resize();
-    }
-  }
-
-  function scheduleSizeSync() {
-    requestAnimationFrame(syncVisualSizes);
-    clearTimeout(resizeSyncTimer);
-    resizeSyncTimer = setTimeout(syncVisualSizes, 320);
-  }
-
-  function syncToolbarUI() {
-    applyLayoutAttributes();
-    const isZen = !dashboardPrefs.showLeft && !dashboardPrefs.showKpis && !dashboardPrefs.showRight;
-
-    for (const btn of layoutBtns) {
-      const active = btn.dataset.layout === dashboardPrefs.layout;
-      btn.classList.toggle('active', active);
-      btn.setAttribute('aria-pressed', String(active));
-    }
-
-    if (btnToggleLeft) {
-      btnToggleLeft.classList.toggle('active', dashboardPrefs.showLeft);
-      btnToggleLeft.setAttribute('aria-pressed', String(dashboardPrefs.showLeft));
-      const label = dashboardPrefs.showLeft ? 'Hide Left Panels' : 'Show Left Panels';
-      btnToggleLeft.setAttribute('aria-label', label);
-      btnToggleLeft.setAttribute('data-tooltip', label);
-    }
-
-    if (btnToggleKpis) {
-      btnToggleKpis.classList.toggle('active', dashboardPrefs.showKpis);
-      btnToggleKpis.setAttribute('aria-pressed', String(dashboardPrefs.showKpis));
-      const label = dashboardPrefs.showKpis ? 'Hide KPI Bar' : 'Show KPI Bar';
-      btnToggleKpis.setAttribute('aria-label', label);
-      btnToggleKpis.setAttribute('data-tooltip', label);
-    }
-
-    if (btnToggleRight) {
-      btnToggleRight.classList.toggle('active', dashboardPrefs.showRight);
-      btnToggleRight.setAttribute('aria-pressed', String(dashboardPrefs.showRight));
-      const label = dashboardPrefs.showRight ? 'Hide Right Panels' : 'Show Right Panels';
-      btnToggleRight.setAttribute('aria-label', label);
-      btnToggleRight.setAttribute('data-tooltip', label);
-    }
-
-    if (btnToggleZen) {
-      btnToggleZen.classList.toggle('active', isZen);
-      btnToggleZen.setAttribute('aria-pressed', String(isZen));
-      btnToggleZen.setAttribute('aria-label', isZen ? 'Exit Zen Globe Mode' : 'Toggle Zen Globe Mode');
-      btnToggleZen.setAttribute('data-tooltip', isZen ? 'Exit Zen Mode (Z)' : 'Zen Globe Mode (Z)');
-    }
-
-    if (btnGlobeRotate) {
-      btnGlobeRotate.classList.toggle('active', dashboardPrefs.autoRotate);
-      btnGlobeRotate.setAttribute('aria-pressed', String(dashboardPrefs.autoRotate));
-      btnGlobeRotate.setAttribute('aria-label', dashboardPrefs.autoRotate ? 'Pause Globe Rotation' : 'Resume Globe Rotation');
-      btnGlobeRotate.setAttribute('data-tooltip', dashboardPrefs.autoRotate ? 'Pause Globe Rotation (R)' : 'Resume Globe Rotation (R)');
-    }
-
-    controls.autoRotate = dashboardPrefs.autoRotate;
-  }
-
-  function setLayout(layout) {
-    if (!VALID_LAYOUTS.has(layout) || dashboardPrefs.layout === layout) return;
-    dashboardPrefs.layout = layout;
-    savePrefs();
-    syncToolbarUI();
-    scheduleSizeSync();
-  }
-
-  function togglePanel(key) {
-    preZenState = null;
-    dashboardPrefs[key] = !dashboardPrefs[key];
-    savePrefs();
-    syncToolbarUI();
-    scheduleSizeSync();
-  }
-
-  function toggleZen() {
-    const isZen = !dashboardPrefs.showLeft && !dashboardPrefs.showKpis && !dashboardPrefs.showRight;
-    if (!isZen) {
-      preZenState = {
-        showLeft: dashboardPrefs.showLeft,
-        showKpis: dashboardPrefs.showKpis,
-        showRight: dashboardPrefs.showRight,
-      };
-      dashboardPrefs.showLeft = false;
-      dashboardPrefs.showKpis = false;
-      dashboardPrefs.showRight = false;
-    } else {
-      const restore = preZenState && (preZenState.showLeft || preZenState.showKpis || preZenState.showRight)
-        ? preZenState
-        : { showLeft: true, showKpis: true, showRight: true };
-      dashboardPrefs.showLeft = restore.showLeft;
-      dashboardPrefs.showKpis = restore.showKpis;
-      dashboardPrefs.showRight = restore.showRight;
-      preZenState = null;
-    }
-    savePrefs();
-    syncToolbarUI();
-    scheduleSizeSync();
-  }
-
-  function toggleAutoRotate() {
-    dashboardPrefs.autoRotate = !dashboardPrefs.autoRotate;
-    savePrefs();
-    syncToolbarUI();
-  }
-
-  function resetGlobeView() {
-    if (controls.target && typeof controls.target.set === 'function') {
-      controls.target.set(0, 0, 0);
-    }
-    if (typeof controls.update === 'function') {
-      controls.update();
-    }
-    world.pointOfView(DEFAULT_GLOBE_POV, 900);
-    if (btnGlobeReset) {
-      btnGlobeReset.classList.add('active');
-      setTimeout(() => btnGlobeReset.classList.remove('active'), 320);
-    }
-  }
-
-  for (const btn of layoutBtns) {
-    btn.addEventListener('click', () => setLayout(btn.dataset.layout));
-  }
-  if (btnToggleLeft) btnToggleLeft.addEventListener('click', () => togglePanel('showLeft'));
-  if (btnToggleKpis) btnToggleKpis.addEventListener('click', () => togglePanel('showKpis'));
-  if (btnToggleRight) btnToggleRight.addEventListener('click', () => togglePanel('showRight'));
-  if (btnToggleZen) btnToggleZen.addEventListener('click', toggleZen);
-  if (btnGlobeRotate) btnGlobeRotate.addEventListener('click', toggleAutoRotate);
-  if (btnGlobeReset) btnGlobeReset.addEventListener('click', resetGlobeView);
-
-  if (typeof ResizeObserver === 'function') {
-    const ro = new ResizeObserver(() => requestAnimationFrame(syncVisualSizes));
-    if (globeEl) ro.observe(globeEl);
-    if (donutEl) ro.observe(donutEl);
-    if (barsEl) ro.observe(barsEl);
-  }
-
-  dashboardControls = { setLayout, toggleZen, toggleAutoRotate, resetGlobeView };
-  syncToolbarUI();
-  scheduleSizeSync();
-})();
