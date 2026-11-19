@@ -243,6 +243,8 @@ html, body {
 }
 .col > .panel { width: 470px; }
 .center { flex: 1; position: relative; min-width: 0; }
+.panel-dist { height: 300px; }
+.panel-bars { height: 430px; }
 
 /* Layout: Split Focus (Globe left, both side panels right) */
 #app[data-layout="split"] .center { order: 1; }

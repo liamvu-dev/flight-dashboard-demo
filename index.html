@@ -13,7 +13,7 @@
 </head>
 <body>
   <div id="stars"></div>
-  <div id="app">
+  <div id="app" data-layout="classic">
     <!-- HEADER -->
     <header class="header">
       <div class="header-left">
@@ -153,7 +153,7 @@
     <!-- BODY -->
     <main class="body">
       <aside class="col left" id="col-left">
-        <div class="panel" style="height:300px">
+        <div class="panel panel-dist">
           <div class="panel-title"><span>Global Route Distribution</span></div>
           <div class="dist">
             <div class="legend" id="legend-left"></div>
@@ -161,7 +161,7 @@
             <div class="legend" id="legend-right"></div>
           </div>
         </div>
-        <div class="panel grow">
+        <div class="panel panel-records grow">
           <div class="panel-title panel-title--records">
             <span>Route Booking Records</span>
             <div class="live-controls">
@@ -207,11 +207,11 @@
       </section>
 
       <aside class="col right" id="col-right">
-        <div class="panel" style="height:430px">
+        <div class="panel panel-bars">
           <div class="panel-title"><span>Top 10 Airlines by Orders</span></div>
           <div id="bars"></div>
         </div>
-        <div class="panel grow">
+        <div class="panel panel-routes grow">
           <div class="panel-title">
             <span id="routes-title">Top Routes – Asia</span>
             <button type="button" id="btn-reset-region" class="filter-reset-pill" hidden title="Show All Regions" aria-label="Reset region filter">Reset ✕</button>

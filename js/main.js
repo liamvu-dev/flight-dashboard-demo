@@ -164,8 +164,14 @@ function resizeVisuals({ includeCharts = true } = {}) {
     }
   }
   if (includeCharts) {
-    if (donut) donut.resize();
-    if (bars) bars.resize();
+    const donutEl = donut?.getDom?.();
+    if (donut && (!donutEl || (donutEl.clientWidth > 0 && donutEl.clientHeight > 0))) {
+      donut.resize();
+    }
+    const barsEl = bars?.getDom?.();
+    if (bars && (!barsEl || (barsEl.clientWidth > 0 && barsEl.clientHeight > 0))) {
+      bars.resize();
+    }
   }
 }
 
@@ -352,6 +358,8 @@ function setLayout(layout) {
   dashboardPrefs.layout = layout;
   saveDashboardPrefs();
   applyPanelVisibility();
+  if (donut) renderDonut();
+  if (bars) renderBars();
   requestAnimationFrame(() => resizeVisuals({ includeCharts: true }));
 }
 
@@ -1155,6 +1163,7 @@ if (btnSnapshot) btnSnapshot.addEventListener('click', captureSnapshot);
 // ===================== Donut: Global Route Distribution =====================
 donut = echarts.init($('#donut'));
 function renderDonut() {
+  const isDock = dashboardPrefs.layout === 'dock';
   const total = regionKeys.reduce((s, r) => s + regionCounts[r], 0);
   const data = regionKeys.map((r) => {
     const color = REGIONS[r].color;
@@ -1182,7 +1191,7 @@ function renderDonut() {
       text: centerText, left: 'center', top: 'center',
       textStyle: {
         color: selectedRegion ? REGIONS[selectedRegion].color : '#e8f8ff',
-        fontFamily: 'Rajdhani', fontWeight: 700, fontSize: 18, lineHeight: 20,
+        fontFamily: 'Rajdhani', fontWeight: 700, fontSize: isDock ? 15 : 18, lineHeight: isDock ? 17 : 20,
       },
     },
     series: [
@@ -1226,17 +1235,19 @@ for (const legendEl of [$('#legend-left'), $('#legend-right')]) {
 // ===================== Bars: Top 10 Airlines =====================
 bars = echarts.init($('#bars'));
 function renderBars() {
+  const isDock = dashboardPrefs.layout === 'dock';
+  const isSplit = dashboardPrefs.layout === 'split';
   const top = AIRLINES.map((a) => ({ ...a, v: airlineCounts[a.code] })).sort((a, b) => b.v - a.v).slice(0, 10);
   bars.setOption({
-    grid: { left: 44, right: 70, top: 6, bottom: 0 },
+    grid: isDock ? { left: 40, right: 62, top: 4, bottom: 2 } : { left: 44, right: 70, top: 6, bottom: 0 },
     xAxis: { type: 'value', show: false, max: (v) => v.max * 1.02 },
     yAxis: {
       type: 'category', inverse: true, data: top.map((a) => a.code),
       axisLine: { show: false }, axisTick: { show: false },
-      axisLabel: { color: '#cfe9ff', fontFamily: 'Orbitron', fontSize: 14 },
+      axisLabel: { color: '#cfe9ff', fontFamily: 'Orbitron', fontSize: isDock ? 12 : 14 },
     },
     series: [{
-      type: 'bar', barWidth: 13, showBackground: true,
+      type: 'bar', barWidth: isDock ? 10 : (isSplit ? 12 : 13), showBackground: true,
       backgroundStyle: { color: 'rgba(255,255,255,.06)', borderRadius: 7 },
       data: top.map((a) => ({
         value: a.v,
@@ -1245,7 +1256,7 @@ function renderBars() {
           color: new echarts.graphic.LinearGradient(0, 0, 1, 0, [{ offset: 0, color: a.color[0] + '55' }, { offset: 1, color: a.color[1] }]),
         },
       })),
-      label: { show: true, position: 'right', color: '#fff', fontFamily: 'Share Tech Mono', fontSize: 15, formatter: (p) => p.value.toLocaleString('en-US') },
+      label: { show: true, position: 'right', color: '#fff', fontFamily: 'Share Tech Mono', fontSize: isDock ? 12.5 : 15, formatter: (p) => p.value.toLocaleString('en-US') },
       animationDurationUpdate: 900,
     }],
   });
