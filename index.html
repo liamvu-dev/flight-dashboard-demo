@@ -145,7 +145,7 @@
       <section class="center">
         <div id="globe"></div>
         <div class="globe-ring"></div>
-        <div class="globe-caption" id="globe-caption">
+        <div class="globe-caption" id="globe-caption" role="group" aria-label="Region Filter">
           <span><i style="background:#ffcc33"></i>Asia</span>
           <span><i style="background:#2eff7a"></i>Europe</span>
           <span><i style="background:#ff2e88"></i>Americas</span>
@@ -161,7 +161,10 @@
           <div id="bars"></div>
         </div>
         <div class="panel grow">
-          <div class="panel-title"><span id="routes-title">Top Routes – Asia</span></div>
+          <div class="panel-title">
+            <span id="routes-title">Top Routes – Asia</span>
+            <button type="button" id="btn-reset-region" class="filter-reset-pill" hidden title="Show All Regions" aria-label="Reset region filter">Reset ✕</button>
+          </div>
           <div id="top-routes"></div>
         </div>
       </aside>
